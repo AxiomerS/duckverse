@@ -4,7 +4,7 @@
 
 # Duckverse
 
-### Raise a robot duck. Keep it charged. Earn DuckCoin.
+### Raise a robot duck. Keep it charged. Earn Duckverse.
 
 *Qwak!*
 
@@ -82,18 +82,19 @@ claim it closes it for everyone.
 
 <br>
 
-## DuckCoin
+## Duckverse
 
-**DC** is the in game currency. You earn it by playing, by leaving your duck to farm passively,
-and by winning; you spend it on everything in the shop. Your balance lives on the server, not
-in your browser, so it cannot be edited by tampering with a save file.
+**Duckverse** is the in game currency, shown as **DC** in your balance. You earn it by
+playing, by leaving your duck to farm passively, and by winning; you spend it on everything
+in the shop. Your balance lives on the server, not in your browser, so it cannot be edited
+by tampering with a save file.
 
 **ETH** is the real money layer, on **Robinhood Chain**. It buys DC, settles the marketplace,
 and pays out quests.
 
-> **$DC is not launched yet.** The plan is to launch it on Robinhood Chain paired with the NVDA
+> **Duckverse is not launched yet.** The plan is to launch it on Robinhood Chain paired with the NVDA
 > RWA token. Until that happens the token panel in game says *not launched*, and any contract
-> address claiming to be $DC is not ours.
+> address claiming to be Duckverse is not ours.
 
 <br>
 
