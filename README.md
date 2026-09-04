@@ -77,7 +77,7 @@ combo multiplier that rewards clean play. Top scores pay out every hour.
 rarity, level and equipped gear. Win and you take XP, DC and sometimes a piece of their gear.
 
 **Quests.** Long running goals such as winning arena fights, reaching a level, or scoring high
-in the rhythm game. Each one pays out in real ETH, and each is a race: the first player to
+in the rhythm game. Each one pays out in NVDA, the tokenized stock on Robinhood Chain, and each is a race: the first player to
 claim it closes it for everyone.
 
 <br>
@@ -89,8 +89,8 @@ playing, by leaving your duck to farm passively, and by winning; you spend it on
 in the shop. Your balance lives on the server, not in your browser, so it cannot be edited
 by tampering with a save file.
 
-**ETH** is the real money layer, on **Robinhood Chain**. It buys DC, settles the marketplace,
-and pays out quests.
+**ETH** is the real money layer, on **Robinhood Chain**. It buys DC and settles the marketplace.
+Quest rewards are paid in **NVDA**, the tokenized stock on the same chain.
 
 > **Duckverse is not launched yet.** The plan is to launch it on Robinhood Chain paired with the NVDA
 > RWA token. Until that happens the token panel in game says *not launched*, and any contract
@@ -110,8 +110,6 @@ was wearing. The treasury takes a small cut, the rest is yours.
 
 <div align="center">
 
-Microduck is a product of [Pollen Robotics](https://pollen-robotics.com/microduck/).
-Duckverse is a fan project, not affiliated with or endorsed by Pollen Robotics, Hugging Face or
-NVIDIA. See [NOTICE.md](NOTICE.md).
+Microduck is a product of [Pollen Robotics](https://pollen-robotics.com/microduck/). See [NOTICE.md](NOTICE.md).
 
 </div>

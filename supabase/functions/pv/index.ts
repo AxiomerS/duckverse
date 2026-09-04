@@ -11,6 +11,7 @@ const PASSIVE_PER_MIN = 2;              // базовый пассив PV/мин
 const COLLECT_CAP_MS = 15 * 60 * 1000;  // не более 15 мин пассива за один collect
 const MULT_CAP = 3;                     // потолок множителя уровня (защита от спуфа level)
 const DAILY_REWARD = 50;
+const START_COINS = 50;                 // стартовый баланс нового кошелька (держать = START_COINS клиента)
 const DAILY_COOLDOWN = 2 * 3600 * 1000; // дейли раз в 2 часа
 const BATTLE_MAX_PER_DAY = 3000;        // дневной кэп выигрыша на арене (won доверяем — Phase 1)
 const RUN_REWARD_COOLDOWN = 3600 * 1000;
@@ -68,8 +69,9 @@ type Bal = { wallet: string; coins: number; last_daily: number; last_collect: nu
 async function getOrCreate(wallet: string): Promise<Bal> {
   const rows = await fetch(`${SB_URL}/rest/v1/balances?wallet=eq.${encodeURIComponent(wallet)}&select=*`, { headers: sbHeaders() }).then((r) => r.json());
   if (rows?.[0]) return rows[0] as Bal;
-  const saveRows = await fetch(`${SB_URL}/rest/v1/saves?wallet=eq.${encodeURIComponent(wallet)}&select=data`, { headers: sbHeaders() }).then((r) => r.json());
-  const coins = Math.floor(Number(saveRows?.[0]?.data?.coins ?? 0)) || 0;
+  // Новый кошелёк стартует с START_COINS. Раньше баланс брался из клиентского сейва (бэкфилл для
+  // игроков до появления серверного баланса): с чистой базой это только дыра, сейв пишет клиент.
+  const coins = START_COINS;
   const now = Date.now();
   const row = { wallet, coins, last_daily: 0, last_collect: now, last_run_reward: 0, battle_day: 0, battle_gain: 0 };
   await fetch(`${SB_URL}/rest/v1/balances`, { method: "POST", headers: sbHeaders({ Prefer: "return=minimal,resolution=ignore-duplicates" }), body: JSON.stringify({ ...row, updated_at: new Date(now).toISOString() }) });
@@ -133,6 +135,13 @@ Deno.serve(async (req) => {
     }
 
     if (action === "daily") {
+      // Один дейли за окно на IP, иначе смена кошелька в том же браузере даёт новый дейли каждый раз.
+      // IP берём из заголовков шлюза; если его нет, лимит не применяем.
+      const ip = (req.headers.get("x-forwarded-for") ?? "").split(",")[0].trim() || req.headers.get("cf-connecting-ip") || "";
+      if (ip) {
+        const okIp = await fetch(`${SB_URL}/rest/v1/rpc/rl_check`, { method: "POST", headers: sbHeaders(), body: JSON.stringify({ p_key: `daily:ip:${ip}`, p_max: 1, p_window_ms: DAILY_COOLDOWN, p_now: now }) }).then((r) => r.json()).catch(() => true);
+        if (okIp === false) return jsonResp({ error: "daily already claimed from this network", coins: Math.floor(b.coins) }, 429);
+      }
       const coins = await rpc("pv_daily", { p_wallet: wallet, p_reward: DAILY_REWARD, p_cooldown: DAILY_COOLDOWN, p_now: now });
       if (coins === null) return jsonResp({ error: "daily not ready", coins: Math.floor(b.coins) }, 409);
       return jsonResp({ coins: Math.floor(coins), credited: DAILY_REWARD });

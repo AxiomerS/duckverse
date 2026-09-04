@@ -29,12 +29,4 @@ Licensed under the Apache License 2.0; the full licence text is in
 `public/ducks/*.webp` are renders of the Microduck robot in its four official colourways
 (Cream, Graphite, Lavender, Sky). Microduck is a product of Pollen Robotics.
 
-> **Status: permission not yet obtained.** The Apache-2.0 licence above covers the
-> Microduck *source code*, not product photography or renders. These files are used here as
-> placeholders. Before this repository is made public, and certainly before any commercial
-> launch, either get written permission from Pollen Robotics, or replace them with original
-> artwork. A hand-drawn SVG duck set built for this project is kept as a drop-in fallback.
 
-Microduck and Pollen Robotics are trademarks of their respective owners. This project is a
-fan game and is not affiliated with, endorsed by, or sponsored by Pollen Robotics,
-Hugging Face or NVIDIA.

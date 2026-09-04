@@ -9,12 +9,12 @@ import { BUFFS, type BuffKind } from "./game/buffs";
 import { FOOD_CHESTS, ACC_CHESTS, PET_CHESTS, bestTier, fmtChance, type PoolItem } from "./game/chests";
 import { type Stats, clamp, xpForLevel, decay, decayMult, decayInactive, levelSilMult, BASE_SIL_PER_MIN, statCap, DAILY_REWARD, DAILY_COOLDOWN, START_COINS, GRANT_V } from "./game/mechanics";
 import { POTIONS, potionById, potionEffects, potionTitle, type Potion } from "./game/potions";
-import { QUESTS } from "./game/quests";
+import { QUESTS, QUEST_CURRENCY } from "./game/quests";
 import { type SavedPet, STORAGE_KEY, loadPet, hydrateSave, type MarketListing } from "./game/save";
 // Импорты кошелька под псевдонимами: ниже в компоненте есть свои connectWallet/disconnectWallet,
 // которые оборачивают эти низкоуровневые вызовы игровой логикой (тосты, автоверификация, сейв).
 import { getWallet, connectWallet as walletConnect, disconnectWallet as walletDisconnect, watchWallet, discoverWallets, onWalletsChanged, selectedWallet, shortAddress, signMessageHex, KNOWN_WALLETS, type WalletInfo } from "./game/wallet";
-import { isCloudEnabled, loadCloudSave, saveCloudSave, submitScore, fetchTopScores, submitArena, fetchTopArena, upsertPvpProfile, findPvpOpponent, battleQueuePoll, battleQueueLeave, battleQueueFinish, fetchListings, confirmMarketBuy, fetchExclusives, createExclusive, deleteExclusive, createQuestClaim, fetchQuestClaims, fetchClaimedQuestIds, markQuestClaimPaid, pvSync, pvDaily, pvSpend, pvRoulette, pvBattle, pvRunReward, isVerified, signIn, setSessionToken, confirmPurchase, requestSell, fetchSellRequests, fetchStuckSellRequests, payoutSell, petsSync, petsStarter, petsChest, petsBreed, petsList, petsCancel, type ScoreRow, type ArenaRow, type Listing, type Exclusive, type SellRequest, type QuestClaim, type LedgerPet } from "./game/cloud";
+import { isCloudEnabled, setAuthLostHandler, loadCloudSave, saveCloudSave, submitScore, fetchTopScores, submitArena, fetchTopArena, upsertPvpProfile, findPvpOpponent, battleQueuePoll, battleQueueLeave, battleQueueFinish, fetchListings, confirmMarketBuy, fetchExclusives, createExclusive, deleteExclusive, createQuestClaim, fetchQuestClaims, fetchClaimedQuestIds, markQuestClaimPaid, pvSync, pvDaily, pvSpend, pvRoulette, pvBattle, pvRunReward, isVerified, signIn, setSessionToken, confirmPurchase, requestSell, fetchSellRequests, fetchStuckSellRequests, payoutSell, petsSync, petsStarter, petsChest, petsBreed, petsList, petsCancel, type ScoreRow, type ArenaRow, type Listing, type Exclusive, type SellRequest, type QuestClaim, type LedgerPet } from "./game/cloud";
 import { sendPayment, isTreasuryConfigured, ETH_PV_RATE, ETH_BUY_PACKS, ETH_SELL_RATE, ETH_SELL_PACKS, MARKET_FEE_BPS } from "./game/pay";
 import { COIN, CHAIN } from "./game/chain";
 import { SPIN_MS, playSpinSound, playWinSound, playDailySound, playModalSound } from "./game/audio";
@@ -107,6 +107,7 @@ function jwtExpMs(token: string): number {
 // видит транзакцию (частый кейс на mainnet при загрузке), подтверждение повторяется — в сессии и при
 // следующем заходе. Всё идемпотентно (подпись — PK), поэтому деньги не теряются и не зачисляются дважды.
 const PENDING_KEY = "duckverse.pending";
+const DAILY_DEVICE_KEY = "duckverse.dailyAt"; // когда на ЭТОМ устройстве брали дейли, независимо от кошелька
 // wallet = реальный плательщик (адрес, вернувшийся из sendPayment) — НЕ читаем текущее состояние
 // "wallet" при сверке: если пользователь переключит аккаунт в your wallet между оплатой и подтверждением,
 // state успеет измениться, а платёж был отправлен со старого адреса — сверка на сервере должна идти
@@ -391,6 +392,17 @@ export default function App() {
       onChain: () => {}, // сеть проверяем и переключаем прямо перед оплатой (ensureChain в pay.ts)
     });
   }, [walletReady, wallet]);
+
+  // Битый токен (сервер сменил JWT_SECRET или срок вышел): сбрасываем «verified», чистим стор,
+  // просим переподписать. Регистрируем один раз.
+  useEffect(() => {
+    setAuthLostHandler(() => {
+      setVerified(false);
+      try { localStorage.removeItem(SESSION_KEY); } catch { /* игнор */ }
+      setToast("Session expired — verify your wallet again (wallet menu)");
+    });
+    return () => setAuthLostHandler(null);
+  }, []);
 
   // Сессия верификации: при смене кошелька восстанавливаем сохранённый токен (если валиден).
   useEffect(() => {
@@ -1285,8 +1297,18 @@ export default function App() {
   async function claimDaily() {
     if (!pet || !dailyReady) return;
     if (!rewardsUnlocked) return setToast("Connect & verify your wallet to claim daily rewards");
+    // Защита от смены кошелька в том же браузере: дейли одно на устройство за окно. Сервер держит
+    // ещё лимит на IP, эта проверка просто не даёт зря дёргать сервер и объясняет игроку, что к чему.
+    try {
+      const at = Number(localStorage.getItem(DAILY_DEVICE_KEY) ?? 0);
+      if (at && Date.now() - at < DAILY_COOLDOWN) return setToast("Daily already claimed on this device — one per device per window");
+    } catch { /* игнор */ }
     const res = await pvDaily();
-    if ("error" in res) { if (typeof res.coins === "number") setCoins(res.coins); return setToast("Daily not ready yet"); }
+    if ("error" in res) {
+      if (typeof res.coins === "number") setCoins(res.coins);
+      return setToast(res.error.includes("network") ? "Daily already claimed from this network — one per network per window" : "Daily not ready yet");
+    }
+    try { localStorage.setItem(DAILY_DEVICE_KEY, String(Date.now())); } catch { /* игнор */ }
     // Стрик держится, пока не пропущено больше одного полного окна между claim'ами (чисто визуальный счётчик).
     const now = Date.now();
     const kept = pet.lastDaily > 0 && now - pet.lastDaily <= DAILY_COOLDOWN * 2;
@@ -1330,7 +1352,7 @@ export default function App() {
     setPet(updated);
     saveCloudSave(wallet, updated);
     setClaimedQuests((m) => ({ ...m, [id]: wallet }));
-    setToast(`✅ Quest reward requested: ${reward} ETH — sent after admin review`);
+    setToast(`✅ Quest reward requested: ${reward} ${QUEST_CURRENCY} — sent after admin review`);
   }
   // Закрыть (скрыть) квест локально. Общее для всех игроков закрытие — с бэкендом.
   function dismissQuest(id: string) {
@@ -1903,11 +1925,11 @@ export default function App() {
                   <button className="quest-x" onClick={() => dismissQuest(q.id)} title="Hide quest">✕</button>
                 </div>
                 {done ? (
-                  <button className="quest-claim" onClick={() => claimQuest(q.id, q.reward)}>✅ Claim {q.reward} ETH</button>
+                  <button className="quest-claim" onClick={() => claimQuest(q.id, q.reward)}>✅ Claim {q.reward} {QUEST_CURRENCY}</button>
                 ) : (
                   <>
                     <div className="quest-track"><div className="quest-fill" style={{ width: `${pct}%` }} /></div>
-                    <div className="quest-prog">{Math.min(val, q.goal).toLocaleString()} / {q.goal.toLocaleString()} · {q.reward} ETH</div>
+                    <div className="quest-prog">{Math.min(val, q.goal).toLocaleString()} / {q.goal.toLocaleString()} · {q.reward} {QUEST_CURRENCY}</div>
                   </>
                 )}
               </div>
@@ -1920,7 +1942,7 @@ export default function App() {
                 <span className="quest-label quest-label-done">{q.emoji} {q.label}</span>
                 <button className="quest-x" onClick={() => dismissQuest(q.id)} title="Hide">✕</button>
               </div>
-              <div className="quest-prog">✅ Reward {q.reward} ETH — awaiting payout</div>
+              <div className="quest-prog">✅ Reward {q.reward} {QUEST_CURRENCY} — awaiting payout</div>
               {wallet && (
                 <button
                   className="quest-wallet"
@@ -2689,7 +2711,7 @@ export default function App() {
             )}
 
             <div className="section-label" style={{ marginTop: 14 }}>🎯 Quest rewards</div>
-            <p className="subtitle" style={{ marginTop: -4 }}>Copy the wallet, send the ETH from the treasury yourself, then Mark paid.</p>
+            <p className="subtitle" style={{ marginTop: -4 }}>Copy the wallet, send the {QUEST_CURRENCY} from the treasury yourself, then Mark paid.</p>
             {adminQuests === null ? (
               <p className="empty">Loading…</p>
             ) : adminQuests.length === 0 ? (
@@ -2701,7 +2723,7 @@ export default function App() {
                   return (
                     <div key={c.id} className="admin-req">
                       <div className="admin-req-info">
-                        <span className="admin-req-amt">{q ? `${q.emoji} ${q.label}` : c.quest_id} → {q?.reward ?? "?"} ETH</span>
+                        <span className="admin-req-amt">{q ? `${q.emoji} ${q.label}` : c.quest_id} → {q?.reward ?? "?"} {QUEST_CURRENCY}</span>
                         <button className="admin-req-who quest-wallet" title="Copy wallet" onClick={() => { navigator.clipboard?.writeText(c.wallet); setToast("Address copied"); }}>📋 {shortAddress(c.wallet)}</button>
                       </div>
                       <div className="admin-req-btns">

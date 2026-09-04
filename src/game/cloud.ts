@@ -17,6 +17,12 @@ export function isCloudEnabled(): boolean {
 // Токен сессии (JWT из auth-функции). Пока его нет — работаем анонимным ключом.
 let sessionToken: string | null = null;
 export function setSessionToken(t: string | null) { sessionToken = t; }
+// Клиент проверяет только срок годности токена, но НЕ подпись (секрета у него нет). Если сервер
+// сменил JWT_SECRET или срок вышел, токен становится битым, а клиент об этом не знает. Ловим 401
+// от любого авторизованного вызова и просим приложение переподписать кошелёк.
+let onAuthLost: (() => void) | null = null;
+export function setAuthLostHandler(fn: (() => void) | null) { onAuthLost = fn; }
+function authLost() { sessionToken = null; if (onAuthLost) onAuthLost(); }
 export function isVerified(): boolean { return !!sessionToken; }
 
 function headers(extra?: Record<string, string>): Record<string, string> {
@@ -412,6 +418,7 @@ async function pvCall<T>(action: string, extra: Record<string, unknown> = {}): P
   try {
     const res = await fetch(`${URL}/functions/v1/pv`, { method: "POST", headers: headers(), body: JSON.stringify({ action, ...extra }) });
     const data = (await res.json().catch(() => ({}))) as EdgeReply<T>;
+    if (res.status === 401) { authLost(); return fail("unauthorized", data.coins); }
     if (!res.ok) return fail(data.error ?? `HTTP ${res.status}`, data.coins);
     return data;
   } catch (e) {
