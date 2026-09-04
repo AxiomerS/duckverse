@@ -12,8 +12,8 @@ Licensed under the Apache License 2.0; the full licence text is in
 
 - Ported from Rust to TypeScript and rewritten to render into a Web Audio `AudioBuffer`
   instead of a native audio stream.
-- Three recipes are ported: `greet` (the "wak-wak" call), `peck`, and `wheee`. `alarm`,
-  `inquire`, `chirp` and `coo` are not.
+- Four recipes are ported: `greet` (the "wak-wak" call), `peck`, `wheee` and `alarm`.
+  `inquire`, `chirp` and `coo` are not. `alarm` is exposed in game as a victory honk.
 - `wheee` is shortened: the original is a ride with a middle section the robot loops while a
   trigger is held. Here it is rendered at 1.9× speed and the loop section is cut out, leaving
   the run-up and the finish, so it works as a one-shot level-up cheer.
