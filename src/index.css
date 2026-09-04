@@ -1,0 +1,37 @@
+:root {
+  --bg: #0c0c0e;
+  --surface: #17171b;
+  --surface-2: #222227;
+  --line: #2c2c33;        /* тонкая линия — разделители, рамки панелей */
+  --line-strong: rgba(245, 130, 42, 0.50); /* оранжевая обводка кнопок */
+  --line-hover: rgba(245, 130, 42, 0.95);  /* она же при наведении */
+  --ink: #f4f4f5;
+  --ink-2: #a1a1aa;
+  --accent: #f5822a;
+  --accent-ink: #ffb173;
+
+  font-family: "IBM Plex Mono", ui-monospace, "Cascadia Code", monospace;
+  color: var(--ink);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  height: 100%;
+  overflow: hidden; /* страница не скроллится; длинные модалки скроллятся внутри себя */
+}
+body {
+  margin: 0;
+  min-height: 100svh;
+  /* чёрный фон с тёплыми оранжевыми отблесками + свечение по бокам */
+  background:
+    radial-gradient(480px 900px at -4% 50%, rgba(245, 130, 42, 0.16), transparent 62%),
+    radial-gradient(480px 900px at 104% 50%, rgba(245, 130, 42, 0.16), transparent 62%),
+    radial-gradient(820px 520px at 50% -8%, rgba(245, 130, 42, 0.10), transparent 60%),
+    radial-gradient(700px 480px at 50% 112%, rgba(240, 120, 30, 0.06), transparent 60%),
+    #09090a;
+}
