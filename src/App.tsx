@@ -1718,7 +1718,7 @@ export default function App() {
                 <div className="pet-stage" key={pet.species}>
                   <span className="pet-glow" style={{ background: RARITY[PETS.find((p) => p.id === pet.species)?.rarity ?? "common"].color }} />
                   <button className={"pet-emoji-big pet-emoji-btn" + (levelUpFx ? " pet-emoji-levelup" : "")} onClick={() => { setPetMenu(true); playQwak(pet.species); }} title={`Interact with ${pet.name}`}>
-                    <PetArt species={pet.species} size={110} accessories={pet.accessories} />
+                    <PetArt species={pet.species} size={110} />
                   </button>
                   {levelUpFx && (
                     <div className="level-up-fx">
