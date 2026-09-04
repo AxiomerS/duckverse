@@ -398,46 +398,66 @@ export async function deleteExclusive(id: string): Promise<boolean> {
 
 // ===== Серверный баланс DC (edge fn "pv") — единственный источник правды по DC =====
 // Все начисления/траты идут сюда; ответ содержит авторитетный coins, которым обновляем зеркало на клиенте.
-async function pvCall(action: string, extra: Record<string, unknown> = {}): Promise<any> {
-  if (!isCloudEnabled()) return { error: "cloud off" };
+// Ответ edge-функции. Форму ожидаемых полей задаёт вызывающая обёртка через T; поверх неё всегда
+// возможны error и coins — их шлёт и путь ошибки. Поля необязательные: сервер мог ответить чем угодно,
+// и обёртки ниже это проверяют, а не верят на слово.
+type EdgeReply<T> = Partial<T> & { error?: string; coins?: number };
+
+async function pvCall<T>(action: string, extra: Record<string, unknown> = {}): Promise<EdgeReply<T>> {
+  // Путь ошибки не несёт полей T, но доказать это дженерику TS не может — отсюда приведение.
+  const fail = (error: string, coins?: number) => ({ error, coins }) as EdgeReply<T>;
+  if (!isCloudEnabled()) return fail("cloud off");
   try {
     const res = await fetch(`${URL}/functions/v1/pv`, { method: "POST", headers: headers(), body: JSON.stringify({ action, ...extra }) });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) return { error: data.error ?? `HTTP ${res.status}`, coins: data.coins };
+    const data = (await res.json().catch(() => ({}))) as EdgeReply<T>;
+    if (!res.ok) return fail(data.error ?? `HTTP ${res.status}`, data.coins);
     return data;
   } catch (e) {
-    return { error: String(e) };
+    return fail(String(e));
   }
 }
+
+// Ответ без баланса там, где он обязан быть, — это сломанный ответ, а не нулевой счёт.
+const BAD_REPLY = "bad server reply";
 // Синхронизация: начислить пассив и вернуть авторитетный баланс. null — облако/кошелёк недоступны.
 export async function pvSync(level: number): Promise<{ coins: number; lastDaily: number } | null> {
-  const d = await pvCall("sync", { level });
+  const d = await pvCall<{ coins: number; lastDaily: number }>("sync", { level });
   return typeof d.coins === "number" ? { coins: d.coins, lastDaily: d.lastDaily ?? 0 } : null;
 }
 // Забрать дейли. Возвращает новый баланс или ошибку.
 export async function pvDaily(): Promise<{ coins: number; credited: number } | { error: string; coins?: number }> {
-  const d = await pvCall("daily");
-  return "error" in d ? d : { coins: d.coins, credited: d.credited ?? 0 };
+  const d = await pvCall<{ coins: number; credited: number }>("daily");
+  if (d.error) return { error: d.error, coins: d.coins };
+  if (typeof d.coins !== "number") return { error: BAD_REPLY };
+  return { coins: d.coins, credited: d.credited ?? 0 };
 }
 // Списать DC за покупку (магазин/сундук/разведение/воскрешение/зелье). Проверка баланса — на сервере.
 export async function pvSpend(amount: number): Promise<{ coins: number } | { error: string; coins?: number }> {
-  const d = await pvCall("spend", { amount });
-  return "error" in d ? d : { coins: d.coins };
+  const d = await pvCall<{ coins: number }>("spend", { amount });
+  if (d.error) return { error: d.error, coins: d.coins };
+  if (typeof d.coins !== "number") return { error: BAD_REPLY };
+  return { coins: d.coins };
 }
 // Рулетка: сервер списывает ставку, крутит RNG, начисляет выигрыш. Возвращает исход для анимации.
 export async function pvRoulette(stake: number, bet: "red" | "black" | "zero"): Promise<{ coins: number; win: boolean; n: number; color: string } | { error: string; coins?: number }> {
-  const d = await pvCall("roulette", { stake, bet });
-  return "error" in d ? d : { coins: d.coins, win: !!d.win, n: d.n, color: d.color };
+  const d = await pvCall<{ coins: number; win: boolean; n: number; color: string }>("roulette", { stake, bet });
+  if (d.error) return { error: d.error, coins: d.coins };
+  if (typeof d.coins !== "number" || typeof d.n !== "number" || typeof d.color !== "string") return { error: BAD_REPLY };
+  return { coins: d.coins, win: !!d.win, n: d.n, color: d.color };
 }
 // Итог боя арены: сервер меняет баланс (ставка + капнутая награда). won доверяем (Phase 1).
 export async function pvBattle(stake: number, won: boolean, level: number): Promise<{ coins: number; locked?: boolean } | { error: string; coins?: number }> {
-  const d = await pvCall("battle", { stake, won, level });
-  return "error" in d ? d : { coins: d.coins, locked: !!d.locked };
+  const d = await pvCall<{ coins: number; locked: boolean }>("battle", { stake, won, level });
+  if (d.error) return { error: d.error, coins: d.coins };
+  if (typeof d.coins !== "number") return { error: BAD_REPLY };
+  return { coins: d.coins, locked: !!d.locked };
 }
 // Награда за топ лидерборда (по рангу, с серверным кулдауном).
 export async function pvRunReward(rank: number): Promise<{ coins: number; credited: number } | { error: string; coins?: number }> {
-  const d = await pvCall("run-reward", { rank });
-  return "error" in d ? d : { coins: d.coins, credited: d.credited ?? 0 };
+  const d = await pvCall<{ coins: number; credited: number }>("run-reward", { rank });
+  if (d.error) return { error: d.error, coins: d.coins };
+  if (typeof d.coins !== "number") return { error: BAD_REPLY };
+  return { coins: d.coins, credited: d.credited ?? 0 };
 }
 
 // ===== Серверное владение питомцами (edge fn "pets" + таблица public.pet_ledger, Phase 2) =====
@@ -457,42 +477,50 @@ export async function petsSync(): Promise<LedgerPet[] | null> {
   }
 }
 
-async function petsCall(action: string, extra: Record<string, unknown> = {}): Promise<any> {
-  if (!isCloudEnabled()) return { error: "cloud off" };
+async function petsCall<T>(action: string, extra: Record<string, unknown> = {}): Promise<EdgeReply<T>> {
+  const fail = (error: string, coins?: number) => ({ error, coins }) as EdgeReply<T>;
+  if (!isCloudEnabled()) return fail("cloud off");
   try {
     const res = await fetch(`${URL}/functions/v1/pets`, { method: "POST", headers: headers(), body: JSON.stringify({ action, ...extra }) });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) return { error: data.error ?? `HTTP ${res.status}`, coins: data.coins };
+    const data = (await res.json().catch(() => ({}))) as EdgeReply<T>;
+    if (!res.ok) return fail(data.error ?? `HTTP ${res.status}`, data.coins);
     return data;
   } catch (e) {
-    return { error: String(e) };
+    return fail(String(e));
   }
 }
 // Выдать стартового (бесплатного) питомца в леджер при создании аккаунта.
 export async function petsStarter(species: string, name: string): Promise<boolean> {
-  const d = await petsCall("starter", { species, name });
-  return !("error" in d);
+  const d = await petsCall<Record<string, never>>("starter", { species, name });
+  return !d.error;
 }
 // Открыть сундук питомца: сервер решает вид, списывает DC, выдаёт в леджер. active — активный вид (для скидки).
 export async function petsChest(chestId: string, active: string): Promise<{ coins: number; species: string; rarity: string } | { error: string; coins?: number }> {
-  const d = await petsCall("chest", { chestId, active });
-  return "error" in d ? d : { coins: d.coins, species: d.species, rarity: d.rarity };
+  const d = await petsCall<{ coins: number; species: string; rarity: string }>("chest", { chestId, active });
+  if (d.error) return { error: d.error, coins: d.coins };
+  if (typeof d.coins !== "number" || !d.species || !d.rarity) return { error: BAD_REPLY };
+  return { coins: d.coins, species: d.species, rarity: d.rarity };
 }
 // Скрестить двух своих питомцев (проверка родителей — на сервере по леджеру).
 export async function petsBreed(parents: string[]): Promise<{ coins: number; species: string; rarity: string } | { error: string; coins?: number }> {
-  const d = await petsCall("breed", { parents });
-  return "error" in d ? d : { coins: d.coins, species: d.species, rarity: d.rarity };
+  const d = await petsCall<{ coins: number; species: string; rarity: string }>("breed", { parents });
+  if (d.error) return { error: d.error, coins: d.coins };
+  if (typeof d.coins !== "number" || !d.species || !d.rarity) return { error: BAD_REPLY };
+  return { coins: d.coins, species: d.species, rarity: d.rarity };
 }
 // Выставить пета на продажу: сервер забирает его из леджера (эскроу) и создаёт лот. accessories — надетые
 // на пета аксессуары (уходят покупателю). Возвращает лот или ошибку.
 export async function petsList(species: string, price: number, level: number, buffs: unknown, name: string, accessories: string[]): Promise<{ listing: Listing } | { error: string }> {
-  const d = await petsCall("list", { species, price, level, buffs, name, accessories });
-  return "error" in d ? d : { listing: d.listing as Listing };
+  const d = await petsCall<{ listing: Listing }>("list", { species, price, level, buffs, name, accessories });
+  if (d.error) return { error: d.error };
+  if (!d.listing) return { error: BAD_REPLY };
+  return { listing: d.listing };
 }
 // Снять свой лот: сервер удаляет лот и возвращает пета (с аксессуарами) в леджер. restored=false → лот уже куплен.
 export async function petsCancel(id: string): Promise<{ restored: boolean; species?: string; level?: number; buffs?: { kind: BuffKind; expiresAt: number }[]; accessories?: string[]; name?: string | null } | { error: string }> {
-  const d = await petsCall("cancel", { id });
-  return "error" in d ? d : { restored: !!d.restored, species: d.species, level: d.level, buffs: d.buffs, accessories: d.accessories, name: d.name };
+  const d = await petsCall<{ restored: boolean; species: string; level: number; buffs: { kind: BuffKind; expiresAt: number }[]; accessories: string[]; name: string | null }>("cancel", { id });
+  if (d.error) return { error: d.error };
+  return { restored: !!d.restored, species: d.species, level: d.level, buffs: d.buffs, accessories: d.accessories, name: d.name };
 }
 
 // ===== Заявки на награды за квесты (таблица public.quest_claims) — выплата SOL вручную админом =====
