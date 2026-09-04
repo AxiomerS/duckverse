@@ -105,8 +105,14 @@ export function BattleGame({ onClose, onWin, onWinNoLoot, onLose, petName, petSp
   // значения на момент монтирования, а не на момент реального закрытия/размонтирования).
   const phaseRef = useRef<Phase>("loadout");
   const matchKindRef = useRef<MatchKind>("bot");
-  phaseRef.current = phase;
-  matchKindRef.current = matchKind;
+  // Пишем в рефы ПОСЛЕ рендера, а не в его теле: запись во время рендера ломает предсказуемость
+  // и справедливо ловится линтером. Эффект без списка зависимостей идёт после каждого рендера,
+  // поэтому к моменту размонтирования в рефах лежат актуальные значения — ровно то, что нужно
+  // cleanup-эффекту ниже.
+  useEffect(() => {
+    phaseRef.current = phase;
+    matchKindRef.current = matchKind;
+  });
 
   const MIN_HP = 10; // нужно минимум 10 HP, чтобы выйти на арену
   const canFight = health >= MIN_HP;
@@ -216,8 +222,12 @@ export function BattleGame({ onClose, onWin, onWinNoLoot, onLose, petName, petSp
       timerRef.current = window.setTimeout(() => { if (searchIdRef.current === myId) startFlip(makeBot(), "bot"); }, 900);
       return;
     }
-    const deadline = Date.now() + ONLINE_TIMEOUT;
+    // Отсчёт стартуем при первом опросе, а не здесь: Date.now() в теле функции компонента
+    // компилятор React считает вызовом во время рендера, хотя попадают сюда только по клику.
+    // poll() запускается несколькими строками ниже, так что момент отсчёта тот же.
+    let deadline = 0;
     const poll = () => {
+      if (!deadline) deadline = Date.now() + ONLINE_TIMEOUT;
       queuePoll({ name: petName, species: petSpecies, level, accessories, bet: betRef.current }).then((r) => {
         if (searchIdRef.current !== myId) return; // поиск отменён/перезапущен
         if (r?.status === "matched" && r.matchId && r.opponent) return startLiveMatch(r.matchId, r.opponent);

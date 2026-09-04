@@ -1066,7 +1066,8 @@ export default function App() {
     while (xp >= xpForLevel(level)) { xp -= xpForLevel(level); level++; }
     let inventory = pet.inventory;
     let ownedAccessories = pet.ownedAccessories;
-    let lootLabel = "loot";
+    // Без начального значения: обе ветки ниже задают его сами, а "loot" никогда не читался.
+    let lootLabel: string;
     if (kind === "accessory") {
       if (!pet.ownedAccessories.includes(id)) ownedAccessories = [...pet.ownedAccessories, id];
       lootLabel = ACCESSORIES.find((a) => a.id === id)?.label ?? "an accessory";
