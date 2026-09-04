@@ -6,8 +6,9 @@ import { PETS } from "../game/pets";
 import { loadoutPower, simulateBattle, hashSeed, pickLootAccessory, accPower, accHp, accCrit, type Loadout, type SimStep } from "../game/power";
 import { type ArenaRow, type PvpProfile, type BattleQueueResult } from "../game/cloud";
 import { shortAddress } from "../game/wallet";
+import { playQwak } from "../game/qwak";
 
-const BOT_NAMES = ["Ragefang", "Shadow", "Bolt", "Tank", "Nibbles", "Vortex", "Pixel", "Goliath", "Sneaky", "Turbo", "Mochi", "Crash", "Zephyr", "Onyx"];
+const BOT_NAMES = ["Qwakstorm", "Shadowbill", "Bolt", "Tankwing", "Nibbles", "Vortex", "Pixelbeak", "Goliath", "Sneakduck", "Turbofeather", "Mochi", "Crashlanding", "Zephyr", "Onyxbill"];
 const TIPS = [
   "Epic+ accessories add crit chance & crit damage.",
   "Feed epic+ food before a fight for a temporary power boost.",
@@ -168,6 +169,7 @@ export function BattleGame({ onClose, onWin, onWinNoLoot, onLose, petName, petSp
     setBot(b);
     setPMax(loadout.hp); setPHp(loadout.hp); setOMax(b.hp); setOHp(b.hp);
     setPhase("intro");
+    playQwak(b.species); // соперник здоровается своим голосом, пока держится заставка VS
     timerRef.current = window.setTimeout(() => {
       const f = first ?? Math.random() < 0.5;
       setArrowSpin(0);
@@ -283,6 +285,7 @@ export function BattleGame({ onClose, onWin, onWinNoLoot, onLose, petName, petSp
             }
             setLootLabel(lootId ? (ACCESSORIES.find((a) => a.id === lootId)?.label ?? null) : null);
           } else {
+            playQwak(b.species, "honk"); // торжествует соперник; свою победу озвучивает App
             // LIVE-поражение: если у меня было надето что-то, ровно этот же расчёт (у победителя) мог
             // выбрать его трофеем — вычисляю то же самое и реально теряю предмет у себя.
             const lostId = kind === "live" && matchId ? pickLootAccessory(accessories, matchId) : null;
