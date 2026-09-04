@@ -25,7 +25,7 @@ import { Roulette } from "./components/Roulette";
 import { RhythmGame } from "./components/RhythmGame";
 import { BattleGame } from "./components/BattleGame";
 
-// Игровая валюта: DC (внутриигровая валюта и крипто-токен $DC).
+// Игровая валюта: DC (метка в балансе и ценах). Токен за ней называется Duckverse.
 const SIL = "DC";
 
 // Виды с недавно добавленным оригинальным артом — подсвечиваем бейджем "New" в списке питомцев.
@@ -73,8 +73,8 @@ const ADMIN_WALLET = "0x69c159cdf7d5264f380c69f68847f806d84ef080";
 // Внешние ссылки проекта (TODO: заменить на финальные).
 const LINK_TWITTER = "https://x.com/PetaVerse_rh";
 const LINK_LAUNCHPAD = "https://www.ponsfamily.com/launchpad";
-// Контракт $DC. ПУСТО, пока токен не запущен — здесь раньше стоял адрес $PV (PetaVerse) из
-// родительского проекта: это ДРУГОЙ токен, и показывать его как $DC нельзя. Вписывать адрес
+// Контракт токена Duckverse. ПУСТО, пока токен не запущен — здесь раньше стоял адрес $PV (PetaVerse) из
+// родительского проекта: это ДРУГОЙ токен, и показывать его как наш нельзя. Вписывать адрес
 // только после реального деплоя пары DC/NVDA-RWA на Robinhood Chain.
 const TOKEN_CA: string = "";
 // Редкость вида питомца по его id — для боевых характеристик в Battle Arena (loadoutPower).
@@ -2472,15 +2472,15 @@ export default function App() {
         </div>
       )}
 
-      {/* ===== Токен $DC (DuckCoin) ===== */}
+      {/* ===== Токен Duckverse (в балансе он показывается короткой меткой DC) ===== */}
       {modal === "pumpfun" && (
         <div className="scrim" onClick={() => setModal(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-head"><h3>🚀 DuckCoin</h3></div>
-            <p className="subtitle" style={{ marginTop: -4 }}><b>DuckCoin ($DC)</b> is the in-game currency. It is planned to launch on Robinhood Chain paired with the <b>NVDA</b> RWA token. Not live yet.</p>
+            <div className="modal-head"><h3>🚀 Duckverse</h3></div>
+            <p className="subtitle" style={{ marginTop: -4 }}><b>Duckverse</b> is the in-game currency, shown as DC in your balance. It is planned to launch on Robinhood Chain paired with the <b>NVDA</b> RWA token. Not live yet.</p>
             <a className="btn btn-primary" href={LINK_LAUNCHPAD} target="_blank" rel="noreferrer">Open the launchpad ↗</a>
             <div className="token-line">
-              <span className="tk-tick">$DC · {TOKEN_CA ? "live" : "not launched"}</span>
+              <span className="tk-tick">Duckverse · {TOKEN_CA ? "live" : "not launched"}</span>
               {TOKEN_CA ? (
                 <>
                   <span
