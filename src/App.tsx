@@ -1834,7 +1834,9 @@ export default function App() {
       {/* ===== Social links (bottom-left) ===== */}
       <div className="social-bar">
         <a className="social-btn" href={LINK_TWITTER} target="_blank" rel="noreferrer" title="X (Twitter)" aria-label="X">𝕏</a>
-        <button className="social-btn social-pv" title="$DC on Pons Family" onClick={() => setModal("pumpfun")}>DC</button>
+        <button className="social-btn social-pons" title="Duckverse on Pons Family" aria-label="Duckverse on Pons Family" onClick={() => setModal("pumpfun")}>
+          <img src="/pons.png" alt="" width={22} height={22} />
+        </button>
       </div>
 
       {/* ===== Quests (bottom-right, collapsible) ===== */}
