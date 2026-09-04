@@ -11,6 +11,10 @@
 // Отличия от оригинала: их Rng заменён на mulberry32 (детерминированный, но другой поток
 // чисел), поэтому конкретные голоса не совпадают с прошивкой робота — совпадает модель звука.
 
+// Возгласы, которые умеет утка. В оригинале рецептов больше (alarm, inquire, chirp, coo) —
+// портированы те, которым в игре нашлось место.
+export type DuckCall = "greet" | "peck" | "cheer";
+
 // ---------- ГСЧ ----------
 function makeRng(seed: number) {
   let s = (seed >>> 0) || 1;
@@ -256,6 +260,69 @@ function greet(p: Personality, r: Rng, sr: number): Float32Array {
   return out;
 }
 
+// Клевок: короткий низкий «ток» с щелчком в атаке. Утка так реагирует на еду.
+function peck(p: Personality, r: Rng, sr: number): Float32Array {
+  const dur = (0.16 + 0.12 * r.random()) / p.speed;
+  const n = Math.max(1, Math.round(dur * sr));
+  // Всегда ниже обычного голоса этой утки: крупные (низкий регистр) клюют совсем басом.
+  const f0 = p.pitchCenterHz * (0.45 + 0.2 * r.random());
+  const freq = lerpCurve(n, sr, [[0, f0 * 1.5], [0.04 * dur, f0], [dur, f0 * 0.8]]);
+  const env = expDecay(n, sr, attackTime(p, dur, 1.0), dur * 0.35);
+  const sig = voice(p, freq, sr, r, 0.3, 0.5);
+  for (let i = 0; i < n; i++) sig[i] *= env[i];
+  // Резкость щелчка зависит от attack_sharpness: «снайперские» утки цокают звонче.
+  const clickLen = Math.min(n, Math.round((0.003 + 0.006 * p.attackSharpness) * sr));
+  const clickGain = 0.4 + 0.4 * p.attackSharpness;
+  for (let i = 0; i < clickLen; i++) {
+    const fade = 1 - i / clickLen;
+    sig[i] += clickGain * r.uniform(-1, 1) * fade * fade;
+  }
+  normalise(sig, -3);
+  return sig;
+}
+
+// Радостный возглас на левелап.
+// Оригинальный `wheee` — длинная «поездка» с зацикленной серединой: робот тянет её, пока зажат
+// курок. Нам нужен возглас, а не поездка, поэтому ускоряем в 1.9 раза и выбрасываем петлю,
+// оставляя разгон и финал. Стык ровный: на петле высота держится постоянной (f0*top с обеих сторон).
+function cheer(p: Personality, r: Rng, sr: number): Float32Array {
+  const speed = p.speed * 1.9;
+  const dStart = (0.8 + 0.3 * r.random()) / speed;
+  const dLoop = (1.6 + 0.6 * r.random()) / speed;
+  const dEnd = (0.55 + 0.25 * r.random()) / speed;
+  const total = dStart + dLoop + dEnd;
+  const n = Math.max(1, Math.round(total * sr));
+  const t1 = dStart;
+  const t2 = dStart + dLoop;
+  const f0 = p.pitchCenterHz * (0.95 + 0.1 * r.random());
+  // Насколько высоко забирается: «разбросанные» утки визжат выше.
+  const top = 1.6 + 0.5 * p.pitchSpread + 0.25 * r.random();
+  const base = lerpCurve(n, sr, [
+    [0, f0 * 0.85], [0.15 * dStart, f0], [t1, f0 * top],
+    [t2, f0 * top], [t2 + 0.25 * dEnd, f0 * top * 1.04], [total, f0 * 0.6],
+  ]);
+  // Дрожь восторга, набирающая силу к разгону.
+  const wobHz = 4.5 + 3 * r.random();
+  const swell = lerpCurve(n, sr, [[0, 0.15], [t1, 1], [total, 1]]);
+  const freq = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const wob = Math.sin(2 * Math.PI * wobHz * (i / sr));
+    freq[i] = base[i] * Math.pow(2, (0.5 * swell[i] * wob) / 12);
+  }
+  const env = lerpCurve(n, sr, [[0, 0], [Math.min(0.06, 0.5 * dStart), 1], [t2 + 0.4 * dEnd, 1], [total, 0]]);
+  // Дрожь заменяет вибрато, жужжания меньше — чтобы глиссандо осталось чистым.
+  const pJoy: Personality = { ...p, vibratoDepth: p.vibratoDepth * 0.5, quackiness: p.quackiness * 0.5 };
+  const sig = voice(pJoy, freq, sr, r, 0.5, 0.5);
+  for (let i = 0; i < n; i++) sig[i] *= env[i];
+  normalise(sig, -4); // нормируем ДО нарезки, иначе куски разъедутся по громкости
+  const n1 = Math.round(t1 * sr);
+  const n2 = Math.min(n, Math.round(t2 * sr));
+  const out = new Float32Array(n1 + (n - n2));
+  out.set(sig.subarray(0, n1), 0);
+  out.set(sig.subarray(n2), n1);
+  return out;
+}
+
 // ---------- Проигрывание ----------
 // Один общий AudioContext на всю игру: браузеры ограничивают их число, а квакаем мы часто.
 let ctx: AudioContext | null = null;
@@ -285,18 +352,22 @@ function seedOf(species: string): number {
 // Синтезировать «wak» конкретного вида в моно-семплы. Вынесено из playQwak, чтобы звук можно
 // было отрендерить вне браузера (скрипт превью пишет из этого WAV-ы на прослушку).
 // variant — как в оригинале: та же утка, но чуть другой возглас; тембр от вида не зависит.
-export function renderQwak(species: string, sampleRate: number, variant = 0): Float32Array {
+export function renderQwak(species: string, sampleRate: number, variant = 0, call: DuckCall = "greet"): Float32Array {
   const seed = seedOf(species);
-  return greet(personality(seed), makeRng((seed ^ Math.imul(variant, 2654435761)) >>> 0), sampleRate);
+  const p = personality(seed);
+  const r = makeRng((seed ^ Math.imul(variant, 2654435761)) >>> 0);
+  if (call === "peck") return peck(p, r, sampleRate);
+  if (call === "cheer") return cheer(p, r, sampleRate);
+  return greet(p, r, sampleRate);
 }
 
 // Квакнуть голосом конкретного вида. Тембр закреплён за видом, вариация — за клик.
-export function playQwak(species: string, volume = 0.55) {
+export function playQwak(species: string, call: DuckCall = "greet", volume = 0.55) {
   try {
     const ac = audioCtx();
     if (!ac) return;
     const sr = ac.sampleRate;
-    const sig = renderQwak(species, sr, Math.floor(Math.random() * 0xffff));
+    const sig = renderQwak(species, sr, Math.floor(Math.random() * 0xffff), call);
     const buf = ac.createBuffer(1, sig.length, sr);
     buf.getChannelData(0).set(sig); // не copyToChannel: у него типы Float32Array<ArrayBuffer> строже
     const src = ac.createBufferSource();

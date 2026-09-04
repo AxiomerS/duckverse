@@ -253,6 +253,7 @@ export default function App() {
     prevSpeciesRef.current = pet.species;
     if (prevSpecies === pet.species && prevLevel !== undefined && pet.level > prevLevel) {
       setLevelUpFx(true);
+      playQwak(pet.species, "cheer");
       const t = setTimeout(() => setLevelUpFx(false), 1400);
       return () => clearTimeout(t);
     }
@@ -810,6 +811,7 @@ export default function App() {
         ? `Yum! ${BUFFS[bk].emoji} ${BUFFS[bk].label} active`
         : `Yum! ${pet.name} ate a ${food.label.toLowerCase()} ${food.emoji}`,
     );
+    playQwak(pet.species, "peck"); // клевок; на левелапе поверх него ляжет радостный возглас
     setJustFedId(food.id);
     setTimeout(() => setJustFedId((id) => (id === food.id ? null : id)), 500);
   }
