@@ -116,7 +116,11 @@ export function loadPet(): SavedPet | null {
 
 // Дозаполнить сейв дефолтами (для сейвов из ОБЛАКА — старые записи могут не иметь новых полей,
 // иначе доступ к отсутствующему полю, напр. questDone.includes(), крашит рендер). Без decay-логики.
-export function hydrateSave(p: any): SavedPet {
+// Сырой сейв из облака: обязателен только костяк, всё остальное дозаполняется дефолтами ниже.
+// Раньше здесь стоял any, и он скрывал ровно это допущение — что species/name/stats есть всегда.
+type RawSave = Partial<SavedPet> & Pick<SavedPet, "species" | "name" | "stats">;
+
+export function hydrateSave(p: RawSave): SavedPet {
   return {
     species: p.species,
     name: p.name,
