@@ -362,7 +362,13 @@ export function renderQwak(species: string, sampleRate: number, variant = 0, cal
 }
 
 // Квакнуть голосом конкретного вида. Тембр закреплён за видом, вариация — за клик.
-export function playQwak(species: string, call: DuckCall = "greet", volume = 0.55) {
+// Громкость на каждый возглас. Рецепты нормированы по ПИКУ, а слышимая громкость идёт за
+// средней энергией: `cheer` тянет почти секунду и звучит заметно громче короткого щелчка
+// `peck` при том же пике. Поэтому у длинного возгласа множитель ниже, у транзиента выше —
+// иначе левелап бьёт по ушам, а кормёжку не слышно.
+const CALL_GAIN: Record<DuckCall, number> = { greet: 0.22, peck: 0.26, cheer: 0.15 };
+
+export function playQwak(species: string, call: DuckCall = "greet", volume = CALL_GAIN[call]) {
   try {
     const ac = audioCtx();
     if (!ac) return;
