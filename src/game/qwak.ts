@@ -13,7 +13,7 @@
 
 // Возгласы, которые умеет утка. В оригинале рецептов больше (alarm, inquire, chirp, coo) —
 // портированы те, которым в игре нашлось место.
-export type DuckCall = "greet" | "peck" | "cheer";
+export type DuckCall = "greet" | "peck" | "cheer" | "honk";
 
 // ---------- ГСЧ ----------
 function makeRng(seed: number) {
@@ -281,6 +281,27 @@ function peck(p: Personality, r: Rng, sr: number): Float32Array {
   return sig;
 }
 
+// Торжествующий гудок на победу в бою. Короткий, взятый выше обычного голоса этой утки:
+// нарочно НЕ `cheer`, потому что победа часто тут же даёт уровень, а левелап квакает `cheer` —
+// два одинаковых глиссандо легли бы друг на друга.
+function honk(p: Personality, r: Rng, sr: number): Float32Array {
+  const dur = (0.2 + 0.12 * r.random()) / p.speed;
+  const n = Math.max(1, Math.round(dur * sr));
+  // Выше центра, но в пределах гудка; pitchSpread решает, насколько высоко забирается.
+  const f0 = p.pitchCenterHz * (1.25 + 0.35 * p.pitchSpread) * (0.94 + 0.12 * r.random());
+  const peakMul = 1.15 + 0.25 * p.pitchSpread + 0.1 * r.random();
+  const fallMul = 0.75 + 0.2 * (1 - p.pitchSpread);
+  const freq = lerpCurve(n, sr, [[0, f0], [0.05 * dur, f0 * peakMul], [dur, f0 * fallMul]]);
+  const env = expDecay(n, sr, attackTime(p, dur, 1.0), dur * (0.4 + 0.2 * r.random()));
+  const sig = voice(p, freq, sr, r, 0.5, 1.0);
+  for (let i = 0; i < n; i++) sig[i] *= env[i];
+  // Хрип на пике зависит от brightness: яркие утки скрипят, мягкие просто вскрикивают.
+  const crackle = 0.04 + 0.1 * p.brightness;
+  for (let i = 0; i < n; i++) sig[i] += crackle * r.normal() * env[i];
+  normalise(sig, -3);
+  return sig;
+}
+
 // Радостный возглас на левелап.
 // Оригинальный `wheee` — длинная «поездка» с зацикленной серединой: робот тянет её, пока зажат
 // курок. Нам нужен возглас, а не поездка, поэтому ускоряем в 1.9 раза и выбрасываем петлю,
@@ -357,6 +378,7 @@ export function renderQwak(species: string, sampleRate: number, variant = 0, cal
   const p = personality(seed);
   const r = makeRng((seed ^ Math.imul(variant, 2654435761)) >>> 0);
   if (call === "peck") return peck(p, r, sampleRate);
+  if (call === "honk") return honk(p, r, sampleRate);
   if (call === "cheer") return cheer(p, r, sampleRate);
   return greet(p, r, sampleRate);
 }
@@ -366,7 +388,7 @@ export function renderQwak(species: string, sampleRate: number, variant = 0, cal
 // средней энергией: `cheer` тянет почти секунду и звучит заметно громче короткого щелчка
 // `peck` при том же пике. Поэтому у длинного возгласа множитель ниже, у транзиента выше —
 // иначе левелап бьёт по ушам, а кормёжку не слышно.
-const CALL_GAIN: Record<DuckCall, number> = { greet: 0.22, peck: 0.26, cheer: 0.15 };
+const CALL_GAIN: Record<DuckCall, number> = { greet: 0.22, peck: 0.26, cheer: 0.15, honk: 0.2 };
 
 export function playQwak(species: string, call: DuckCall = "greet", volume = CALL_GAIN[call]) {
   try {

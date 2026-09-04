@@ -1079,6 +1079,7 @@ export default function App() {
     setPet({ ...pet, coins, xp, level, battleWins: pet.battleWins + 1, inventory, ownedAccessories, updatedAt: now });
     if (wallet) submitArena({ wallet, name: pet.name, species: pet.species, power: loadoutPower(pet.level, pet.accessories, 0, speciesRarity(pet.species)).power, wins: pet.battleWins + 1, losses: pet.battleLosses });
     const pvNote = "error" in res ? " (DC needs a verified wallet)" : res.locked ? " · arena DC unlocks at 10+ players" : "";
+    playQwak(pet.species, "honk"); // торжествующий гудок; если победа дала уровень, левелап добавит свой возглас
     setToast(`🏆 Victory! +60 XP, looted ${lootLabel}${pvNote}`);
   }
 
@@ -1096,6 +1097,7 @@ export default function App() {
     setPet({ ...pet, coins, xp, level, battleWins: pet.battleWins + 1, updatedAt: now });
     if (wallet) submitArena({ wallet, name: pet.name, species: pet.species, power: loadoutPower(pet.level, pet.accessories, 0, speciesRarity(pet.species)).power, wins: pet.battleWins + 1, losses: pet.battleLosses });
     const pvNote = "error" in res ? " (DC needs a verified wallet)" : res.locked ? " · arena DC unlocks at 10+ players" : "";
+    playQwak(pet.species, "honk");
     setToast(`🏆 Victory! +60 XP${pvNote}`);
   }
 
