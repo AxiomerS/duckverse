@@ -46,6 +46,22 @@ const NEW_SPECIES = new Set(["tiger", "dino"]);
 // заданы заранее, чтобы залп был одинаковым от раза к разу и не дёргал рендер случайностью.
 const SPARKS = Array.from({ length: 18 }, (_, i) => ({ angle: i * 20 + (i % 2) * 7, dist: 96 + (i % 3) * 28, delay: (i % 4) * 55 }));
 
+// Залп искр: каждая третья белая, остальные цвета редкости. `big` это mythic: крупнее и дважды.
+function Sparks({ color, big, className }: { color: string; big?: boolean; className: string }) {
+  return (
+    <div className={"sparks " + className + (big ? " sparks-big" : "")} aria-hidden>
+      {SPARKS.map((s, i) => (
+        <span key={i} style={{ "--a": s.angle + "deg", "--d": s.dist + "px", "--t": s.delay + "ms", background: i % 3 === 0 ? "#fff" : color } as CSSProperties} />
+      ))}
+    </div>
+  );
+}
+
+// Редкость вида; для неизвестного id считаем common.
+function rarityOf(species: string): Rarity {
+  return PETS.find((p) => p.id === species)?.rarity ?? "common";
+}
+
 function ReelIcon({ v, size = 46 }: { v: string; size?: number }) {
   if (v.startsWith("pet:")) return <PetArt species={v.slice(4)} size={size} />;
   return <>{v}</>;
@@ -1291,7 +1307,7 @@ export default function App() {
     const dailyStreak = kept ? pet.dailyStreak + 1 : 1;
     setPet((p) => (p ? { ...p, coins: res.coins, lastDaily: now, dailyStreak, updatedAt: now } : p));
     setToast(`Daily reward: +${res.credited} ${SIL}`);
-    playDailySound();
+    playDailySound(rarityOf(pet.species)); // мелодия длиннее и богаче у редких уток
   }
 
   // Купить зелье → в инвентарь зелий (не выпивается сразу). DC списывается на сервере.
@@ -1519,6 +1535,7 @@ export default function App() {
   // Здоровье активного вида в pet.stats, остальных — в progress. Нет записи (не гидратирован) = считаем живым.
   const allDead = !!pet && pet.ownedSpecies.length > 0 && pet.ownedSpecies.every((sp) => (sp === pet.species ? pet.stats.health : (pet.progress[sp]?.stats.health ?? 100)) <= 0);
   const cap = pet ? statCap(pet.level) : 100; // макс fullness/happiness (растёт с уровнем)
+  const activeRarity: Rarity = pet ? rarityOf(pet.species) : "common";
   // Настроение утки на сцене: стат просел до 20 (тот же порог, что у подписи mood() и у красной
   // полоски) — утка тускнеет, качается медленнее, над головой подсказка, чего не хватает.
   // Приоритет по опасности: здоровье, потом голод, потом скука. У мёртвой сцены нет.
@@ -1755,17 +1772,16 @@ export default function App() {
             ) : (
               <>
                 <div className="pet-stage" key={pet.species}>
-                  {(() => {
-                    const rarity = PETS.find((p) => p.id === pet.species)?.rarity ?? "common";
-                    return <span className={"pet-glow pet-glow-" + rarity} style={{ background: RARITY[rarity].color }} />;
-                  })()}
+                  <span className={"pet-glow pet-glow-" + activeRarity} style={{ background: RARITY[activeRarity].color }} />
                   <button className={"pet-emoji-big pet-emoji-btn" + (petFx ? " pet-emoji-" + petFx : "") + (levelUpFx ? " pet-emoji-levelup" : "") + (lowMood ? " pet-emoji-low" : "")} onClick={() => { setPetMenu(true); playQwak(pet.species); bumpPetFx("hop"); }} title={`Interact with ${pet.name}`}>
                     <PetArt species={pet.species} size={110} />
                   </button>
                   {lowMood && <span className="pet-mood">{LOW_MOOD_LABEL[lowMood]}</span>}
                   {levelUpFx && (
                     <div className="level-up-fx">
-                      <span className="level-up-text">LEVEL UP!</span>
+                      <span className="level-up-ring" style={{ borderColor: RARITY[activeRarity].color }} />
+                      <Sparks className="stage-sparks" color={RARITY[activeRarity].color} big={activeRarity === "mythic"} />
+                      <span className="level-up-text">LEVEL UP!<small>Level {pet.level}</small></span>
                     </div>
                   )}
                 </div>
@@ -2950,11 +2966,7 @@ export default function App() {
         <div className="scrim scrim-top" onClick={() => chest.revealed && setChest(null)}>
           <div className={"chest-open" + (chest.revealed && (chest.won.rarity === "legendary" || chest.won.rarity === "mythic") ? " chest-open-" + chest.won.rarity : "")} onClick={(e) => e.stopPropagation()}>
             {chest.revealed && (chest.won.rarity === "legendary" || chest.won.rarity === "mythic") && (
-              <div className={"chest-sparks chest-sparks-" + chest.won.rarity} aria-hidden>
-                {SPARKS.map((s, i) => (
-                  <span key={i} style={{ "--a": s.angle + "deg", "--d": s.dist + "px", "--t": s.delay + "ms", background: i % 3 === 0 ? "#fff" : chest.won.rarityColor } as CSSProperties} />
-                ))}
-              </div>
+              <Sparks className="chest-sparks" color={chest.won.rarityColor ?? "#fff"} big={chest.won.rarity === "mythic"} />
             )}
             <div className="reel-viewport">
               <div className="reel-pointer" />
