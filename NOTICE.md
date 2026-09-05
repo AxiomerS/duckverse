@@ -17,6 +17,8 @@ Licensed under the Apache License 2.0; the full licence text is in
 - `wheee` is shortened: the original is a ride with a middle section the robot loops while a
   trigger is held. Here it is rendered at 1.9× speed and the loop section is cut out, leaving
   the run-up and the finish, so it works as a one-shot level-up cheer.
+- `whine`, the low-stat complaint, is an original recipe written for this game and is not derived
+  from any Microduck voice.
 - The original random number generator is replaced with `mulberry32`. It is still
   deterministic per seed, but produces a different number stream, so the resulting voices
   do not match those of any physical Microduck; only the sound model is the same.

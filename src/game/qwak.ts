@@ -12,8 +12,8 @@
 // чисел), поэтому конкретные голоса не совпадают с прошивкой робота — совпадает модель звука.
 
 // Возгласы, которые умеет утка. В оригинале рецептов больше (alarm, inquire, chirp, coo) —
-// портированы те, которым в игре нашлось место.
-export type DuckCall = "greet" | "peck" | "cheer" | "honk";
+// портированы те, которым в игре нашлось место. `whine` свой, в оригинале его нет.
+export type DuckCall = "greet" | "peck" | "cheer" | "honk" | "whine";
 
 // ---------- ГСЧ ----------
 function makeRng(seed: number) {
@@ -344,6 +344,27 @@ function cheer(p: Personality, r: Rng, sr: number): Float32Array {
   return out;
 }
 
+// Жалобный стон, когда стат просел. Рецепт свой, из Microduck не портирован. Ниже обычного
+// голоса, чуть взлетает и долго сползает вниз, к концу начинает дрожать: интонация «ну-у-у».
+// Больше дыхания и меньше жужжания, чтобы вышел стон, а не кряк. Звучит сам по себе, без
+// действия игрока, поэтому нарочно мягче остальных.
+function whine(p: Personality, r: Rng, sr: number): Float32Array {
+  const dur = (0.55 + 0.2 * r.random()) / p.speed;
+  const n = Math.max(1, Math.round(dur * sr));
+  const f0 = p.pitchCenterHz * (0.75 + 0.1 * r.random());
+  const freq = lerpCurve(n, sr, [[0, f0 * 0.95], [0.15 * dur, f0 * 1.08], [0.55 * dur, f0 * 0.85], [dur, f0 * 0.6]]);
+  // Дрожь набирает силу на второй половине.
+  const wobHz = 5 + 2 * r.random();
+  const swell = lerpCurve(n, sr, [[0, 0], [0.4 * dur, 0], [dur, 1]]);
+  for (let i = 0; i < n; i++) freq[i] *= Math.pow(2, (0.35 * swell[i] * Math.sin(2 * Math.PI * wobHz * (i / sr))) / 12);
+  const env = lerpCurve(n, sr, [[0, 0], [0.08 * dur, 1], [0.6 * dur, 0.8], [dur, 0]]);
+  const pSad: Personality = { ...p, quackiness: p.quackiness * 0.6 };
+  const sig = voice(pSad, freq, sr, r, 0.4, 1.6);
+  for (let i = 0; i < n; i++) sig[i] *= env[i];
+  normalise(sig, -4);
+  return sig;
+}
+
 // ---------- Проигрывание ----------
 // Один общий AudioContext на всю игру: браузеры ограничивают их число, а квакаем мы часто.
 let ctx: AudioContext | null = null;
@@ -380,6 +401,7 @@ export function renderQwak(species: string, sampleRate: number, variant = 0, cal
   if (call === "peck") return peck(p, r, sampleRate);
   if (call === "honk") return honk(p, r, sampleRate);
   if (call === "cheer") return cheer(p, r, sampleRate);
+  if (call === "whine") return whine(p, r, sampleRate);
   return greet(p, r, sampleRate);
 }
 
@@ -388,7 +410,7 @@ export function renderQwak(species: string, sampleRate: number, variant = 0, cal
 // средней энергией: `cheer` тянет почти секунду и звучит заметно громче короткого щелчка
 // `peck` при том же пике. Поэтому у длинного возгласа множитель ниже, у транзиента выше —
 // иначе левелап бьёт по ушам, а кормёжку не слышно.
-const CALL_GAIN: Record<DuckCall, number> = { greet: 0.22, peck: 0.26, cheer: 0.15, honk: 0.2 };
+const CALL_GAIN: Record<DuckCall, number> = { greet: 0.22, peck: 0.26, cheer: 0.15, honk: 0.2, whine: 0.16 };
 
 export function playQwak(species: string, call: DuckCall = "greet", volume = CALL_GAIN[call]) {
   try {

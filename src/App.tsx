@@ -17,7 +17,7 @@ import { getWallet, connectWallet as walletConnect, disconnectWallet as walletDi
 import { isCloudEnabled, loadCloudSave, saveCloudSave, submitScore, fetchTopScores, submitArena, fetchTopArena, upsertPvpProfile, findPvpOpponent, battleQueuePoll, battleQueueLeave, battleQueueFinish, fetchListings, confirmMarketBuy, fetchExclusives, createExclusive, deleteExclusive, createQuestClaim, fetchQuestClaims, fetchClaimedQuestIds, markQuestClaimPaid, pvSync, pvDaily, pvSpend, pvRoulette, pvBattle, pvRunReward, isVerified, signIn, setSessionToken, confirmPurchase, requestSell, fetchSellRequests, fetchStuckSellRequests, payoutSell, petsSync, petsStarter, petsChest, petsBreed, petsList, petsCancel, type ScoreRow, type ArenaRow, type Listing, type Exclusive, type SellRequest, type QuestClaim, type LedgerPet } from "./game/cloud";
 import { sendPayment, isTreasuryConfigured, ETH_PV_RATE, ETH_BUY_PACKS, ETH_SELL_RATE, ETH_SELL_PACKS, MARKET_FEE_BPS } from "./game/pay";
 import { COIN, CHAIN } from "./game/chain";
-import { SPIN_MS, playSpinSound, playWinSound, playDailySound, playModalSound, playLowStatSound } from "./game/audio";
+import { SPIN_MS, playSpinSound, playWinSound, playDailySound, playModalSound } from "./game/audio";
 import { playQwak } from "./game/qwak";
 import { Coin, StatBar } from "./components/ui";
 import { PetArt } from "./components/PetArt";
@@ -191,6 +191,18 @@ export default function App() {
   const [caCopied, setCaCopied] = useState(false); // временная галочка на месте CA после копирования
   const [justFedId, setJustFedId] = useState<string | null>(null); // временная галочка "Fed ✓" на карточке еды
   const [levelUpFx, setLevelUpFx] = useState(false); // короткая анимация "LEVEL UP!" над питомцем
+  // Реакция утки на игрока: подскок на тап и поглаживание, клевок на кормёжку.
+  const [petFx, setPetFx] = useState<"hop" | "peck" | null>(null);
+  const petFxTimer = useRef<number | null>(null);
+  function bumpPetFx(kind: "hop" | "peck") {
+    if (petFxTimer.current) clearTimeout(petFxTimer.current);
+    // Сброс и запуск в следующем кадре, чтобы при быстрых кликах анимация начиналась заново.
+    setPetFx(null);
+    requestAnimationFrame(() => {
+      setPetFx(kind);
+      petFxTimer.current = window.setTimeout(() => setPetFx(null), 650);
+    });
+  }
   // Chest opening: a roulette strip of emojis that scrolls and lands on the won one.
   // Display-only — the won item is already added to inventory/owned when the chest opens.
   type WonItem = { emoji: string; label: string; rarity: Rarity; rarityLabel?: string; rarityColor?: string };
@@ -331,7 +343,7 @@ export default function App() {
     const lowF = pet.stats.fullness < statCap20;
     const lowH = pet.stats.happiness < statCap20;
     if ((lowF && !lowFullnessRef.current) || (lowH && !lowHappinessRef.current)) {
-      playLowStatSound();
+      playQwak(pet.species, "whine"); // жалобный стон голосом самой утки
     }
     lowFullnessRef.current = lowF;
     lowHappinessRef.current = lowH;
@@ -825,6 +837,7 @@ export default function App() {
         : `Yum! ${pet.name} ate a ${food.label.toLowerCase()} ${food.emoji}`,
     );
     playQwak(pet.species, "peck"); // клевок; на левелапе поверх него ляжет радостный возглас
+    bumpPetFx("peck");
     setJustFedId(food.id);
     setTimeout(() => setJustFedId((id) => (id === food.id ? null : id)), 500);
   }
@@ -1144,6 +1157,7 @@ export default function App() {
       { kind: "cuddled" as BuffKind, expiresAt: now + BUFFS.cuddled.durationMs },
     ];
     setPet({ ...pet, buffs, updatedAt: now });
+    bumpPetFx("hop");
     setToast(`🤚 ${pet.name} feels loved — 🤚 Cuddled: −10% decay for 1h`);
   }
   // Воскресить мёртвого питомца за лекарство (DC списывается на сервере).
@@ -1745,7 +1759,7 @@ export default function App() {
                     const rarity = PETS.find((p) => p.id === pet.species)?.rarity ?? "common";
                     return <span className={"pet-glow pet-glow-" + rarity} style={{ background: RARITY[rarity].color }} />;
                   })()}
-                  <button className={"pet-emoji-big pet-emoji-btn" + (levelUpFx ? " pet-emoji-levelup" : "") + (lowMood ? " pet-emoji-low" : "")} onClick={() => { setPetMenu(true); playQwak(pet.species); }} title={`Interact with ${pet.name}`}>
+                  <button className={"pet-emoji-big pet-emoji-btn" + (petFx ? " pet-emoji-" + petFx : "") + (levelUpFx ? " pet-emoji-levelup" : "") + (lowMood ? " pet-emoji-low" : "")} onClick={() => { setPetMenu(true); playQwak(pet.species); bumpPetFx("hop"); }} title={`Interact with ${pet.name}`}>
                     <PetArt species={pet.species} size={110} />
                   </button>
                   {lowMood && <span className="pet-mood">{LOW_MOOD_LABEL[lowMood]}</span>}
