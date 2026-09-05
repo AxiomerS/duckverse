@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, lazy, Suspense } from "react";
 import "./App.css";
 import { RARITY, rollRarity, XP_BY_RARITY, type Rarity } from "./game/rarity";
 import { PETS, STARTER_PETS, SPECIES_PERK, speciesEffect, isBasePet, type PetId } from "./game/pets";
@@ -22,8 +22,17 @@ import { playQwak } from "./game/qwak";
 import { Coin, StatBar } from "./components/ui";
 import { PetArt } from "./components/PetArt";
 import { Roulette } from "./components/Roulette";
-import { RhythmGame } from "./components/RhythmGame";
-import { BattleGame } from "./components/BattleGame";
+// Миниигры лежат в отдельных чанках: первому экрану их код не нужен, они подгружаются
+// в момент, когда игрок открывает ритм-трек или арену.
+const RhythmGame = lazy(() => import("./components/RhythmGame").then((m) => ({ default: m.RhythmGame })));
+const BattleGame = lazy(() => import("./components/BattleGame").then((m) => ({ default: m.BattleGame })));
+
+// Заглушка на время подгрузки чанка: тот же скрим, что у модалок, чтобы экран не мигал.
+const CHUNK_LOADING = (
+  <div className="scrim">
+    <div className="modal"><p className="subtitle">Loading...</p></div>
+  </div>
+);
 
 // Игровая валюта: DC (метка в балансе и ценах). Токен за ней называется Duckverse.
 const SIL = "DC";
@@ -2215,30 +2224,32 @@ export default function App() {
 
       {/* ===== Play: rhythm mini-game ===== */}
       {modal === "play" && pet && (
-        <RhythmGame
-          petName={pet.name}
-          petSpecies={pet.species}
-          petEmoji={PETS.find((p) => p.id === pet.species)?.emoji ?? "🦆"}
-          onClose={() => setModal(null)}
-          onFinish={(score, happy, durationMs) => {
-            const cost = playFullnessCost(durationMs);
-            const prevBest = petRef.current?.bestScore ?? 0;
-            setPet((p) =>
-              p
-                ? {
-                    ...p,
-                    stats: { ...p.stats, happiness: clamp(p.stats.happiness + happy), fullness: clamp(p.stats.fullness - cost) },
-                    totalScore: p.totalScore + score,
-                    bestScore: Math.max(p.bestScore, score),
-                    updatedAt: Date.now(),
-                  }
-                : p,
-            );
-            // Новый личный рекорд → отправляем в глобальный лидерборд (если кошелёк подключён).
-            if (wallet && score > prevBest && petRef.current) submitScore(wallet, petRef.current.name, score);
-            setToast(`🎵 Score ${score} · +${happy} happy · −${cost} fullness`);
-          }}
-        />
+        <Suspense fallback={CHUNK_LOADING}>
+          <RhythmGame
+            petName={pet.name}
+            petSpecies={pet.species}
+            petEmoji={PETS.find((p) => p.id === pet.species)?.emoji ?? "🦆"}
+            onClose={() => setModal(null)}
+            onFinish={(score, happy, durationMs) => {
+              const cost = playFullnessCost(durationMs);
+              const prevBest = petRef.current?.bestScore ?? 0;
+              setPet((p) =>
+                p
+                  ? {
+                      ...p,
+                      stats: { ...p.stats, happiness: clamp(p.stats.happiness + happy), fullness: clamp(p.stats.fullness - cost) },
+                      totalScore: p.totalScore + score,
+                      bestScore: Math.max(p.bestScore, score),
+                      updatedAt: Date.now(),
+                    }
+                  : p,
+              );
+              // Новый личный рекорд → отправляем в глобальный лидерборд (если кошелёк подключён).
+              if (wallet && score > prevBest && petRef.current) submitScore(wallet, petRef.current.name, score);
+              setToast(`🎵 Score ${score} · +${happy} happy · −${cost} fullness`);
+            }}
+          />
+        </Suspense>
       )}
 
       {/* ===== Marketplace ===== */}
@@ -2434,29 +2445,31 @@ export default function App() {
 
       {/* ===== Game 2: Battle Arena ===== */}
       {modal === "battle" && pet && (
-        <BattleGame
-          onClose={() => setModal(null)}
-          onWin={battleWin}
-          onWinNoLoot={battleWinNoLoot}
-          onLose={battleLose}
-          petName={pet.name}
-          petSpecies={pet.species}
-          level={pet.level}
-          accessories={pet.accessories}
-          loadout={loadoutPower(pet.level, pet.accessories, activePowerBuff(pet.powerBuff, Date.now()) + potEff.power, speciesRarity(pet.species))}
-          powerBuffActive={activePowerBuff(pet.powerBuff, Date.now()) + potEff.power}
-          wins={pet.battleWins}
-          losses={pet.battleLosses}
-          coins={pet.coins}
-          health={pet.stats.health}
-          arenaTop={arenaTop}
-          myWallet={wallet}
-          onlineEnabled={!!wallet && isCloudEnabled()}
-          fetchOpponent={() => (wallet ? findPvpOpponent(wallet) : Promise.resolve(null))}
-          queuePoll={battleQueuePoll}
-          queueLeave={battleQueueLeave}
-          queueFinish={battleQueueFinish}
-        />
+        <Suspense fallback={CHUNK_LOADING}>
+          <BattleGame
+            onClose={() => setModal(null)}
+            onWin={battleWin}
+            onWinNoLoot={battleWinNoLoot}
+            onLose={battleLose}
+            petName={pet.name}
+            petSpecies={pet.species}
+            level={pet.level}
+            accessories={pet.accessories}
+            loadout={loadoutPower(pet.level, pet.accessories, activePowerBuff(pet.powerBuff, Date.now()) + potEff.power, speciesRarity(pet.species))}
+            powerBuffActive={activePowerBuff(pet.powerBuff, Date.now()) + potEff.power}
+            wins={pet.battleWins}
+            losses={pet.battleLosses}
+            coins={pet.coins}
+            health={pet.stats.health}
+            arenaTop={arenaTop}
+            myWallet={wallet}
+            onlineEnabled={!!wallet && isCloudEnabled()}
+            fetchOpponent={() => (wallet ? findPvpOpponent(wallet) : Promise.resolve(null))}
+            queuePoll={battleQueuePoll}
+            queueLeave={battleQueueLeave}
+            queueFinish={battleQueueFinish}
+          />
+        </Suspense>
       )}
 
       {/* ===== Play: game picker ===== */}
