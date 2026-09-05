@@ -1,3 +1,5 @@
+import type { Rarity } from "./rarity";
+
 // Рулетка: сколько миллисекунд лента крутится перед показом результата.
 export const SPIN_MS = 5200;
 
@@ -92,14 +94,29 @@ export function playModalSound() {
   }
 }
 
-// Радостный "монетный" звон при получении daily-награды: короткое восходящее трезвучие.
-export function playDailySound() {
+// Мелодия daily-награды зависит от редкости активной утки: у common прежнее короткое трезвучие,
+// дальше пробег длиннее и шаг чуть шире, с epic в конце добавляется сверкающий аккорд.
+// Ноты в герцах: G4 392, C5 523.25, E5 659.25, G5 783.99, B5 987.77, C6 1046.5, E6 1318.5,
+// G6 1568, C7 2093, E7 2637.
+const DAILY_TUNES: Record<Rarity, { notes: number[]; step: number; chord?: number[] }> = {
+  common: { notes: [523.25, 659.25, 987.77], step: 0.06 },
+  rare: { notes: [523.25, 659.25, 783.99, 1046.5], step: 0.065 },
+  epic: { notes: [523.25, 659.25, 783.99, 1046.5, 1318.5], step: 0.07, chord: [1046.5, 1318.5, 1568] },
+  legendary: { notes: [392, 523.25, 659.25, 783.99, 1046.5, 1318.5], step: 0.075, chord: [1046.5, 1318.5, 1568, 2093] },
+  mythic: { notes: [392, 523.25, 659.25, 783.99, 1046.5, 1318.5, 1568, 2093], step: 0.08, chord: [1046.5, 1318.5, 1568, 2093, 2637] },
+};
+
+export function playDailySound(rarity: Rarity = "common") {
   try {
     const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
     const ctx = new Ctx();
     const t = ctx.currentTime;
-    [523.25, 659.25, 987.77].forEach((f, i) => tone(ctx, f, t + i * 0.06, 0.22, 0.16, "triangle"));
-    setTimeout(() => ctx.close(), 500);
+    const tune = DAILY_TUNES[rarity];
+    tune.notes.forEach((f, i) => tone(ctx, f, t + i * tune.step, 0.22, 0.16, "triangle"));
+    const chordAt = t + tune.notes.length * tune.step;
+    // Аккорд синусами, тише и длиннее: он должен звенеть под концом пробега, а не перекрикивать его.
+    tune.chord?.forEach((f) => tone(ctx, f, chordAt, 0.7, 0.07, "sine"));
+    setTimeout(() => ctx.close(), Math.ceil((tune.notes.length * tune.step + 1) * 1000));
   } catch {
     /* аудио недоступно — игнорируем */
   }
