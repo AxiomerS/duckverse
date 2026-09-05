@@ -15,7 +15,7 @@ import { type SavedPet, STORAGE_KEY, loadPet, hydrateSave, type MarketListing } 
 // Импорты кошелька под псевдонимами: ниже в компоненте есть свои connectWallet/disconnectWallet,
 // которые оборачивают эти низкоуровневые вызовы игровой логикой (тосты, автоверификация, сейв).
 import { getWallet, connectWallet as walletConnect, disconnectWallet as walletDisconnect, watchWallet, discoverWallets, onWalletsChanged, selectedWallet, shortAddress, signMessageHex, KNOWN_WALLETS, type WalletInfo } from "./game/wallet";
-import { isCloudEnabled, setAuthLostHandler, loadCloudSave, saveCloudSave, submitScore, fetchTopScores, submitArena, fetchTopArena, upsertPvpProfile, findPvpOpponent, battleQueuePoll, battleQueueLeave, battleQueueFinish, fetchListings, confirmMarketBuy, fetchExclusives, createExclusive, deleteExclusive, pvSync, pvDaily, pvSpend, pvRoulette, pvBattle, pvRunReward, pvQuest, isVerified, signIn, setSessionToken, confirmPurchase, requestSell, fetchSellRequests, fetchStuckSellRequests, payoutSell, petsSync, petsStarter, petsChest, petsBreed, petsList, petsCancel, type ScoreRow, type ArenaRow, type Listing, type Exclusive, type SellRequest, type LedgerPet } from "./game/cloud";
+import { isCloudEnabled, setAuthLostHandler, loadCloudSave, saveCloudSave, submitScore, fetchTopScores, submitArena, fetchTopArena, upsertPvpProfile, findPvpOpponent, battleQueuePoll, battleQueueLeave, battleQueueFinish, fetchListings, confirmMarketBuy, fetchExclusives, createExclusive, deleteExclusive, pvSync, pvDaily, pvSpend, pvRoulette, pvBattle, pvRunReward, pvQuest, isVerified, signIn, signInGuest, pvMerge, setSessionToken, confirmPurchase, requestSell, fetchSellRequests, fetchStuckSellRequests, payoutSell, petsSync, petsStarter, petsChest, petsBreed, petsList, petsCancel, type ScoreRow, type ArenaRow, type Listing, type Exclusive, type SellRequest, type LedgerPet } from "./game/cloud";
 import { sendPayment, isTreasuryConfigured, ETH_PV_RATE, ETH_BUY_PACKS, ETH_SELL_RATE, ETH_SELL_PACKS, MARKET_FEE_BPS } from "./game/pay";
 import { COIN, CHAIN } from "./game/chain";
 import { SPIN_MS, playSpinSound, playWinSound, playDailySound, playModalSound } from "./game/audio";
@@ -108,6 +108,7 @@ function jwtExpMs(token: string): number {
 // видит транзакцию (частый кейс на mainnet при загрузке), подтверждение повторяется — в сессии и при
 // следующем заходе. Всё идемпотентно (подпись — PK), поэтому деньги не теряются и не зачисляются дважды.
 const PENDING_KEY = "duckverse.pending";
+const GUEST_KEY = "duckverse.guest";          // гостевая сессия: { id, token }
 const DAILY_DEVICE_KEY = "duckverse.dailyAt"; // когда на ЭТОМ устройстве брали дейли, независимо от кошелька
 // wallet = реальный плательщик (адрес, вернувшийся из sendPayment) — НЕ читаем текущее состояние
 // "wallet" при сверке: если пользователь переключит аккаунт в your wallet между оплатой и подтверждением,
@@ -404,6 +405,11 @@ export default function App() {
     return () => setAuthLostHandler(null);
   }, []);
 
+  const [guestId, setGuestId] = useState<string | null>(null); // играем без кошелька под этим id
+  // Под каким id играем в облаке: подтверждённый кошелёк главнее, иначе гость. Денежные пути
+  // (покупка DC, маркетплейс, продажа) по-прежнему требуют именно кошелька с подписью.
+  const playerId = wallet && verified ? wallet : guestId;
+
   // Сессия верификации: при смене кошелька восстанавливаем сохранённый токен (если валиден).
   useEffect(() => {
     if (!wallet) { setSessionToken(null); setVerified(false); return; }
@@ -425,32 +431,32 @@ export default function App() {
   // Облако: при подключении кошелька грузим его сейв. Если у кошелька его ещё нет —
   // заливаем текущего локального питомца (чтобы прогресс не потерялся).
   useEffect(() => {
-    if (!wallet || !isCloudEnabled()) return;
+    if (!playerId || !isCloudEnabled()) return;
     let cancelled = false;
     setCloudLoading(true);
-    loadCloudSave(wallet)
+    loadCloudSave(playerId)
       .then((cloud) => {
         if (cancelled) return;
         const cloudPet = cloud ? hydrateSave(cloud) : null; // дозаполняем дефолтами (старые сейвы без новых полей)
         if (cloudPet) setPet(cloudPet); // облачный питомец этого кошелька — источник правды
-        else if (petRef.current) saveCloudSave(wallet, petRef.current); // у кошелька сейва нет → заливаем локального
+        else if (petRef.current) saveCloudSave(playerId, petRef.current); // у кошелька сейва нет → заливаем локального
         const p = cloudPet ?? petRef.current;
-        if (p && p.bestScore > 0) submitScore(wallet, p.name, p.bestScore); // засветиться в лидерборде
+        if (p && p.bestScore > 0) submitScore(playerId, p.name, p.bestScore); // засветиться в лидерборде
         if (p && p.battleWins + p.battleLosses > 0)
-          submitArena({ wallet, name: p.name, species: p.species, power: loadoutPower(p.level, p.accessories, 0, speciesRarity(p.species)).power, wins: p.battleWins, losses: p.battleLosses });
-        if (p) upsertPvpProfile({ wallet, name: p.name, species: p.species, level: p.level, accessories: p.accessories }); // профиль для PvP
+          submitArena({ wallet: playerId, name: p.name, species: p.species, power: loadoutPower(p.level, p.accessories, 0, speciesRarity(p.species)).power, wins: p.battleWins, losses: p.battleLosses });
+        if (p) upsertPvpProfile({ wallet: playerId, name: p.name, species: p.species, level: p.level, accessories: p.accessories }); // профиль для PvP
         // Авторитетный баланс DC с сервера (начисляет пассив + бэкфилл). Требует верификации (JWT).
         if (p && isVerified()) pvSync(p.level).then((r) => { if (r && !cancelled) setPet((pp) => (pp ? { ...pp, coins: r.coins, lastDaily: r.lastDaily } : pp)); });
       })
       .finally(() => { if (!cancelled) setCloudLoading(false); });
     return () => { cancelled = true; };
-  }, [wallet]);
+  }, [playerId]);
 
   // Phase 2: авторитетный список владения — из pet_ledger (не из сейва). Сливаем его в сейв, где
   // ownedSpecies становится ЗЕРКАЛОМ леджера (как coins — зеркало balances). Так подделанный
   // ownedSpecies в localStorage — просто картинка: продать за ETH можно лишь то, что есть в леджере.
   useEffect(() => {
-    if (!wallet || !verified || !isCloudEnabled()) return;
+    if (!playerId || !isCloudEnabled()) return;
     let cancelled = false;
     (async () => {
       let ledger = await petsSync();
@@ -469,7 +475,7 @@ export default function App() {
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wallet, verified]);
+  }, [playerId]);
 
   // Привести сейв в соответствие с леджером: ownedSpecies = виды из леджера; имена/прогресс неактивных
   // видов дозаполняем из леджера; убираем из progress виды, которых в леджере уже нет (проданы/фейковые).
@@ -487,7 +493,7 @@ export default function App() {
       }
       for (const sp of Object.keys(progress)) if (!owned.includes(sp)) delete progress[sp];
       const next = { ...p, ownedSpecies: owned, names, progress, updatedAt: Date.now() };
-      if (wallet) saveCloudSave(wallet, next);
+      if (playerId) saveCloudSave(playerId, next);
       return next;
     });
   }
@@ -549,17 +555,17 @@ export default function App() {
 
   // Облако: периодически сохраняем прогресс + обновляем боевой профиль для PvP (раз в 20с).
   useEffect(() => {
-    if (!wallet || !isCloudEnabled()) return;
+    if (!playerId || !isCloudEnabled()) return;
     const iv = setInterval(() => {
       const p = petRef.current;
       if (!p) return;
-      saveCloudSave(wallet, p);
-      upsertPvpProfile({ wallet, name: p.name, species: p.species, level: p.level, accessories: p.accessories });
+      saveCloudSave(playerId, p);
+      upsertPvpProfile({ wallet: playerId, name: p.name, species: p.species, level: p.level, accessories: p.accessories });
       // Пассив начисляет сервер: периодически синхронизируем баланс (если кошелёк верифицирован).
       if (isVerified()) pvSync(p.level).then((r) => { if (r) setPet((pp) => (pp ? { ...pp, coins: r.coins } : pp)); });
     }, 20000);
     return () => clearInterval(iv);
-  }, [wallet]);
+  }, [playerId]);
 
   // Реконсилятор незавершённых оплат: добиваем платежи, которые не успели подтвердиться (сеть ещё
   // не видит tx / RPC подвис) — сеть рано или поздно увидит tx → DC начислится / пет выдастся
@@ -580,6 +586,28 @@ export default function App() {
     const iv = setInterval(reconcilePending, 30000);
     return () => { cancelled = true; clearInterval(iv); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wallet, verified]);
+
+  // Гостевая сессия: пока нет подтверждённого кошелька, играем под гостевым id. Так дейли,
+  // рулетка, сундуки и квесты работают сразу, а подпись нужна только для денежных путей.
+  useEffect(() => {
+    if (!isCloudEnabled() || (wallet && verified)) return;
+    let cancelled = false;
+    (async () => {
+      let stored: { id?: string; token?: string } | null = null;
+      try { stored = JSON.parse(localStorage.getItem(GUEST_KEY) ?? "null"); } catch { /* нет сессии */ }
+      if (stored?.id && stored.token && jwtExpMs(stored.token) > Date.now()) {
+        setSessionToken(stored.token);
+        setGuestId(stored.id);
+        return;
+      }
+      const r = await signInGuest(stored?.id ?? null);
+      if (cancelled || !r) return;
+      try { localStorage.setItem(GUEST_KEY, JSON.stringify(r)); } catch { /* приватный режим */ }
+      setSessionToken(r.token);
+      setGuestId(r.id);
+    })();
+    return () => { cancelled = true; };
   }, [wallet, verified]);
 
   function createPet() {
@@ -617,7 +645,7 @@ export default function App() {
     });
     // Phase 2: стартовый питомец выдаётся сервером в pet_ledger (если кошелёк уже верифицирован;
     // иначе засеется позже при синхронизации леджера). ownedSpecies в сейве — лишь зеркало.
-    if (wallet && verified && isCloudEnabled()) petsStarter(picked, name.trim());
+    if (playerId && isCloudEnabled()) petsStarter(picked, name.trim());
     playQwak(picked);
     setToast(`Qwak! ${name.trim()} is awake 🦆`);
   }
@@ -894,7 +922,7 @@ export default function App() {
     }
   }
   async function disconnectWallet() {
-    if (wallet && petRef.current) await saveCloudSave(wallet, petRef.current); // сохраняем последнее состояние
+    if (playerId && petRef.current) await saveCloudSave(playerId, petRef.current); // сохраняем последнее состояние
     await walletDisconnect(); // best-effort: не каждый EVM-кошелёк умеет отзывать доступ по просьбе сайта
     setWallet(null);
     setWalletMenu(false);
@@ -913,7 +941,13 @@ export default function App() {
         setVerified(true);
         setWalletMenu(false);
         localStorage.setItem(SESSION_KEY, JSON.stringify({ wallet: w, token }));
+        setSessionToken(token);
         setToast("✅ Wallet verified");
+        // Гостевой баланс переезжает на кошелёк один раз, остаток гостя сервер обнуляет.
+        if (guestId) {
+          const m = await pvMerge(guestId);
+          if (!("error" in m)) setCoins(m.coins);
+        }
       } else {
         setToast("Verification failed — is the auth function deployed?");
       }
@@ -953,7 +987,7 @@ export default function App() {
       const acc = prog.accessories ?? [];
       const { activeAccessories, progress: strippedProgress } = stripAccessoriesElsewhere(p.accessories, p.progress, acc, sp);
       const merged = { ...p, accessories: activeAccessories, ownedSpecies: [...p.ownedSpecies, sp], ownedAccessories: acc.length ? Array.from(new Set([...p.ownedAccessories, ...acc])) : p.ownedAccessories, progress: { ...strippedProgress, [sp]: prog }, names: serverSave.names?.[sp] ? { ...p.names, [sp]: serverSave.names[sp] } : p.names, updatedAt: Date.now() };
-      if (wallet) saveCloudSave(wallet, merged);
+      if (playerId) saveCloudSave(playerId, merged);
       return merged;
     });
   }
@@ -986,7 +1020,7 @@ export default function App() {
       // Не 404 → сделка завершена на сервере (уже обработано / оформлен возврат). Перечитаем сейв,
       // чтобы подхватить пета, если он всё же выдан.
       setToast(res.refund ? "Couldn't complete — refund queued (admin returns your ETH)" : "Purchase settled");
-      loadCloudSave(wallet).then((s) => { if (s) setPet(hydrateSave(s)); });
+      if (playerId) loadCloudSave(playerId).then((s) => { if (s) setPet(hydrateSave(s)); });
       return "done";
     } finally {
       settlingRef.current.delete(e.sig);
@@ -1089,7 +1123,7 @@ export default function App() {
     const res = await pvBattle(stake, true, pet.level); // серверный расчёт DC
     const coins = "error" in res ? pet.coins : res.coins;
     setPet({ ...pet, coins, xp, level, battleWins: pet.battleWins + 1, inventory, ownedAccessories, updatedAt: now });
-    if (wallet) submitArena({ wallet, name: pet.name, species: pet.species, power: loadoutPower(pet.level, pet.accessories, 0, speciesRarity(pet.species)).power, wins: pet.battleWins + 1, losses: pet.battleLosses });
+    if (playerId) submitArena({ wallet: playerId, name: pet.name, species: pet.species, power: loadoutPower(pet.level, pet.accessories, 0, speciesRarity(pet.species)).power, wins: pet.battleWins + 1, losses: pet.battleLosses });
     const pvNote = "error" in res ? " (DC needs a verified wallet)" : res.locked ? " · arena DC unlocks at 10+ players" : "";
     playQwak(pet.species, "honk"); // торжествующий гудок; если победа дала уровень, левелап добавит свой возглас
     setToast(`🏆 Victory! +60 XP, looted ${lootLabel}${pvNote}`);
@@ -1107,7 +1141,7 @@ export default function App() {
     const res = await pvBattle(stake, true, pet.level); // серверный расчёт DC
     const coins = "error" in res ? pet.coins : res.coins;
     setPet({ ...pet, coins, xp, level, battleWins: pet.battleWins + 1, updatedAt: now });
-    if (wallet) submitArena({ wallet, name: pet.name, species: pet.species, power: loadoutPower(pet.level, pet.accessories, 0, speciesRarity(pet.species)).power, wins: pet.battleWins + 1, losses: pet.battleLosses });
+    if (playerId) submitArena({ wallet: playerId, name: pet.name, species: pet.species, power: loadoutPower(pet.level, pet.accessories, 0, speciesRarity(pet.species)).power, wins: pet.battleWins + 1, losses: pet.battleLosses });
     const pvNote = "error" in res ? " (DC needs a verified wallet)" : res.locked ? " · arena DC unlocks at 10+ players" : "";
     playQwak(pet.species, "honk");
     setToast(`🏆 Victory! +60 XP${pvNote}`);
@@ -1128,7 +1162,7 @@ export default function App() {
     const accessories = lostAccessoryId ? pet.accessories.filter((id) => id !== lostAccessoryId) : pet.accessories;
     const ownedAccessories = lostAccessoryId ? pet.ownedAccessories.filter((id) => id !== lostAccessoryId) : pet.ownedAccessories;
     setPet({ ...pet, stats: { ...pet.stats, health }, coins, accessories, ownedAccessories, battleLosses: pet.battleLosses + 1, updatedAt: now });
-    if (wallet) submitArena({ wallet, name: pet.name, species: pet.species, power: loadoutPower(pet.level, accessories, 0, speciesRarity(pet.species)).power, wins: pet.battleWins, losses: pet.battleLosses + 1 });
+    if (playerId) submitArena({ wallet: playerId, name: pet.name, species: pet.species, power: loadoutPower(pet.level, accessories, 0, speciesRarity(pet.species)).power, wins: pet.battleWins, losses: pet.battleLosses + 1 });
     const lootNote = lostAccessoryId ? ` — the winner looted your ${ACCESSORIES.find((a) => a.id === lostAccessoryId)?.label ?? "accessory"}!` : "";
     setToast(`💔 Defeat! ${pet.name} took 10 damage${stake ? ` and lost ${stake} ${SIL}` : ""}${lootNote}`);
   }
@@ -1262,7 +1296,7 @@ export default function App() {
   // Награды (daily/рулетка) — только для подключённого+верифицированного кошелька: тогда кулдаун
   // и баланс DC живут в облаке per-wallet, и абузер не сбросит их, очистив localStorage/создав
   // новый локальный «аккаунт» (для нового старта нужен реально новый кошелёк your wallet — это трение).
-  const rewardsUnlocked = !!wallet && verified;
+  const rewardsUnlocked = !!playerId;
   const dailyReady = pet ? uiNow - pet.lastDaily >= DAILY_COOLDOWN : false;
   // Дейли начисляет СЕРВЕР (фиксированная сумма, кулдаун серверный → сброс очисткой localStorage не работает).
   async function claimDaily() {
@@ -1313,11 +1347,10 @@ export default function App() {
   // для этого кошелька. reward здесь только для тоста, сумму решает сервер.
   async function claimQuest(id: string, reward: number) {
     if (!pet || pet.questClaimed.includes(id)) return;
-    if (!wallet || !isCloudEnabled()) return setToast("Connect your wallet to claim quest rewards");
-    if (!verified) return setToast("Verify your wallet first (wallet menu)");
+    if (!playerId || !isCloudEnabled()) return setToast("Quests need the cloud — try again in a moment");
     // Уровень сервер читает из облачного сейва, а тот уезжает не мгновенно: без этого Claim
     // сразу после левелапа упирался бы в «сервер видит меньше прогресса».
-    await saveCloudSave(wallet, pet);
+    await saveCloudSave(playerId, pet);
     const res = await pvQuest(id);
     if ("error" in res) {
       if (typeof res.coins === "number") setCoins(res.coins);
@@ -1328,7 +1361,7 @@ export default function App() {
     const now = Date.now();
     const updated = { ...pet, coins: res.coins, questClaimed: [...pet.questClaimed, id], updatedAt: now };
     setPet(updated);
-    saveCloudSave(wallet, updated);
+    if (playerId) saveCloudSave(playerId, updated);
     setToast(`✅ Quest reward: +${res.credited || reward} ${SIL}`);
     playDailySound(rarityOf(pet.species));
   }
@@ -1373,7 +1406,7 @@ export default function App() {
       }
       // Успех → обновляем локальное зеркало (убираем вид + его аксессуары), чтобы автосейв их не вернул.
       setPet(base);
-      saveCloudSave(wallet, base);
+      if (playerId) saveCloudSave(playerId, base);
       fetchListings("sale").then(setMarketListings);
     } else {
       // Локальный лот (без облака) — виден только тебе.
@@ -1400,7 +1433,7 @@ export default function App() {
       updatedAt: Date.now(),
     };
     setPet(updated);
-    if (wallet && isCloudEnabled()) saveCloudSave(wallet, updated);
+    if (playerId && isCloudEnabled()) saveCloudSave(playerId, updated);
   }
 
   // Снять свой лот с продажи и вернуть пета. Если лот уже куплен — вернуть нечего.
@@ -2253,7 +2286,7 @@ export default function App() {
                   : p,
               );
               // Новый личный рекорд → отправляем в глобальный лидерборд (если кошелёк подключён).
-              if (wallet && score > prevBest && petRef.current) submitScore(wallet, petRef.current.name, score);
+              if (playerId && score > prevBest && petRef.current) submitScore(playerId, petRef.current.name, score);
               setToast(`🎵 Score ${score} · +${happy} happy · −${cost} fullness`);
             }}
           />
@@ -2472,7 +2505,7 @@ export default function App() {
             arenaTop={arenaTop}
             myWallet={wallet}
             onlineEnabled={!!wallet && isCloudEnabled()}
-            fetchOpponent={() => (wallet ? findPvpOpponent(wallet) : Promise.resolve(null))}
+            fetchOpponent={() => (playerId ? findPvpOpponent(playerId) : Promise.resolve(null))}
             queuePoll={battleQueuePoll}
             queueLeave={battleQueueLeave}
             queueFinish={battleQueueFinish}

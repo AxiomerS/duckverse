@@ -103,6 +103,25 @@ export async function payoutSell(id: string, action: "approve" | "reject" | "res
 }
 
 // Верификация кошелька: шлём подпись в Edge Function, получаем JWT. Возвращает токен или null.
+// Гостевая сессия: токен без подписи кошелька. id выдаёт сервер, клиент хранит его и предъявляет,
+// чтобы продлить сессию. Для сервера гость это обычный игрок со своим балансом.
+export async function signInGuest(existingId?: string | null): Promise<{ token: string; id: string } | null> {
+  if (!isCloudEnabled()) return null;
+  try {
+    const res = await fetch(`${URL}/functions/v1/auth`, {
+      method: "POST",
+      headers: { apikey: KEY!, Authorization: `Bearer ${KEY!}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ guest: existingId ?? "" }),
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { token?: string; id?: string };
+    if (!data.token || !data.id) return null;
+    return { token: data.token, id: data.id };
+  } catch {
+    return null;
+  }
+}
+
 export async function signIn(wallet: string, message: string, signatureHex: string): Promise<string | null> {
   if (!isCloudEnabled()) return null;
   try {
@@ -456,6 +475,13 @@ export async function pvQuest(questId: string): Promise<{ coins: number; credite
   if (d.error) return { error: d.error, coins: d.coins };
   if (typeof d.coins !== "number") return { error: BAD_REPLY };
   return { coins: d.coins, credited: Number(d.credited) || 0 };
+}
+// Перенести баланс гостя на кошелёк (один раз на кошелёк, с потолком на стороне сервера).
+export async function pvMerge(guestId: string): Promise<{ coins: number } | { error: string; coins?: number }> {
+  const d = await pvCall<{ coins: number }>("merge", { guest: guestId });
+  if (d.error) return { error: d.error, coins: d.coins };
+  if (typeof d.coins !== "number") return { error: BAD_REPLY };
+  return { coins: d.coins };
 }
 export async function pvRoulette(stake: number, bet: "red" | "black" | "zero"): Promise<{ coins: number; win: boolean; n: number; color: string } | { error: string; coins?: number }> {
   const d = await pvCall<{ coins: number; win: boolean; n: number; color: string }>("roulette", { stake, bet });

@@ -12,6 +12,7 @@ import { verifyMessage } from "npm:viem@2.21.55";
 
 const JWT_SECRET = Deno.env.get("JWT_SECRET") ?? "";
 const MAX_AGE_MS = 5 * 60 * 1000; // подпись действительна 5 минут
+const GUEST_TTL_DAYS = 180;        // гостевая сессия живёт полгода (id лежит в localStorage игрока)
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
@@ -42,7 +43,26 @@ function jsonResp(body: unknown, status = 200): Response {
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   try {
-    const { wallet, message, signature } = await req.json();
+    const body = await req.json();
+    const now0 = Math.floor(Date.now() / 1000);
+
+    // Гость: играет без кошелька. Идентификатор выдаёт сервер (24 hex), клиент хранит его в
+    // localStorage и предъявляет, чтобы продлить сессию. Это bearer-секрет: кто знает id, тот и
+    // гость, но угадать его нельзя, а лежит он только в браузере игрока. Кошелька у гостя нет,
+    // поэтому денежные пути (покупка DC, маркетплейс, продажа) ему по-прежнему закрыты.
+    if (body.guest !== undefined) {
+      let id = typeof body.guest === "string" ? body.guest : "";
+      if (id && !/^g[0-9a-f]{24}$/.test(id)) return jsonResp({ error: "bad guest id" }, 400);
+      if (!id) {
+        const rnd = new Uint8Array(12);
+        crypto.getRandomValues(rnd);
+        id = "g" + Array.from(rnd).map((b) => b.toString(16).padStart(2, "0")).join("");
+      }
+      const token = await signJwt({ role: "authenticated", sub: id, wallet: id, guest: true, iat: now0, exp: now0 + 60 * 60 * 24 * GUEST_TTL_DAYS });
+      return jsonResp({ token, id });
+    }
+
+    const { wallet, message, signature } = body;
     if (!wallet || !message || !signature) return jsonResp({ error: "missing fields" }, 400);
 
     // Адрес приводим к нижнему регистру — тем же способом, что и клиент (normalizeAddress в

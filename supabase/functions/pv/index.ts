@@ -1,7 +1,7 @@
 // Supabase Edge Function "pv": СЕРВЕРНЫЙ баланс PV (единственный источник правды).
 // БЕЗ внешних зависимостей. JWT wallet-auth (как в sell). Пишет в public.balances через service_role.
 // Клиент шлёт { action, ... } с Bearer-JWT кошелька; сервер валидирует и возвращает новый баланс.
-// Действия: sync | collect | daily | spend | roulette | battle | run-reward | quest.
+// Действия: sync | collect | daily | spend | roulette | battle | run-reward | quest | merge.
 const JWT_SECRET = Deno.env.get("JWT_SECRET") ?? "";
 const SB_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SERVICE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
@@ -11,7 +11,8 @@ const PASSIVE_PER_MIN = 2;              // базовый пассив PV/мин
 const COLLECT_CAP_MS = 15 * 60 * 1000;  // не более 15 мин пассива за один collect
 const MULT_CAP = 3;                     // потолок множителя уровня (защита от спуфа level)
 const DAILY_REWARD = 50;
-const START_COINS = 50;                 // стартовый баланс нового кошелька (держать = START_COINS клиента)
+const START_COINS = 50;
+const MERGE_CAP = 500;                  // потолок переноса гостевого баланса на кошелёк, один раз на кошелёк                 // стартовый баланс нового кошелька (держать = START_COINS клиента)
 const DAILY_COOLDOWN = 2 * 3600 * 1000; // дейли раз в 2 часа
 const BATTLE_MAX_PER_DAY = 3000;        // дневной кэп выигрыша на арене (won доверяем — Phase 1)
 const RUN_REWARD_COOLDOWN = 3600 * 1000;
@@ -203,6 +204,18 @@ Deno.serve(async (req) => {
       const day = Math.floor(now / 86400000);
       const reward = Math.min(40 + Math.max(1, level | 0) * 10, 200); // капим награду (level не доверяем)
       const coins = await rpc("pv_battle", { p_wallet: wallet, p_won: won, p_stake: stake, p_reward: reward, p_day: day, p_max: BATTLE_MAX_PER_DAY });
+      return jsonResp({ coins: Math.floor(coins ?? b.coins) });
+    }
+
+    // Перенос баланса гостя на кошелёк при первой верификации. Гостей можно наплодить, очищая
+    // браузер, поэтому перенос один раз на кошелёк (rl_check) и не больше MERGE_CAP.
+    if (action === "merge") {
+      const guest = String(body.guest ?? "");
+      if (!/^g[0-9a-f]{24}$/.test(guest)) return jsonResp({ error: "bad guest id" }, 400);
+      if (guest === wallet) return jsonResp({ coins: Math.floor(b.coins), moved: 0 });
+      const okOnce = await fetch(`${SB_URL}/rest/v1/rpc/rl_check`, { method: "POST", headers: sbHeaders(), body: JSON.stringify({ p_key: `merge:${wallet}`, p_max: 1, p_window_ms: 365 * 24 * 3600 * 1000, p_now: now }) }).then((r) => r.json()).catch(() => false);
+      if (okOnce === false) return jsonResp({ error: "already merged", coins: Math.floor(b.coins) }, 409);
+      const coins = await rpc("pv_merge_guest", { p_guest: guest, p_wallet: wallet, p_cap: MERGE_CAP });
       return jsonResp({ coins: Math.floor(coins ?? b.coins) });
     }
 

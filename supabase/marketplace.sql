@@ -580,3 +580,33 @@ end;
 $$;
 revoke execute on function public.pv_quest_claim(text,text,numeric,bigint) from public;
 grant execute on function public.pv_quest_claim(text,text,numeric,bigint) to service_role;
+
+-- ============================================================================================
+-- §13. Гостевые игроки и перенос баланса на кошелёк (7 сентября 2026)
+-- ============================================================================================
+-- Гость это обычная строка balances с wallet вида g<24 hex> (выдаёт edge fn auth). Все pv_*
+-- функции работают с ним без изменений: для них wallet просто текст. При первой верификации
+-- кошелька edge fn pv (действие merge) переносит баланс гостя на кошелёк функцией ниже:
+-- не больше потолка, гость обнуляется. Один перенос на кошелёк сторожит rl_check в pv.
+
+create or replace function public.pv_merge_guest(p_guest text, p_wallet text, p_cap numeric)
+returns numeric
+language plpgsql
+as $$
+declare
+  v_amount numeric;
+  v_coins  numeric;
+begin
+  select least(coins, p_cap) into v_amount from public.balances where wallet = p_guest for update;
+  if v_amount is null or v_amount <= 0 then
+    select coins into v_coins from public.balances where wallet = p_wallet;
+    return v_coins;
+  end if;
+  update public.balances set coins = coins - v_amount, updated_at = now() where wallet = p_guest;
+  update public.balances set coins = coins + v_amount, updated_at = now() where wallet = p_wallet
+    returning coins into v_coins;
+  return v_coins;
+end;
+$$;
+revoke execute on function public.pv_merge_guest(text,text,numeric) from public;
+grant execute on function public.pv_merge_guest(text,text,numeric) to service_role;
