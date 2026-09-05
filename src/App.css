@@ -1873,9 +1873,21 @@ textarea {
   height: 40px;
   border-radius: 50%;
   filter: blur(16px);
-  opacity: 0.55;
+  --aura-o: 0.55;
+  opacity: var(--aura-o);
   pointer-events: none;
 }
+/* Сила ауры растёт с редкостью: у common её почти нет, у legendary и mythic она дышит. */
+.pet-glow-common { --aura-o: 0.22; width: 96px; }
+.pet-glow-rare { --aura-o: 0.5; }
+.pet-glow-epic { --aura-o: 0.62; width: 130px; }
+.pet-glow-legendary { --aura-o: 0.72; width: 150px; animation: auraPulse 3s ease-in-out infinite; }
+.pet-glow-mythic { --aura-o: 0.85; width: 170px; height: 48px; animation: auraPulse 2.2s ease-in-out infinite; }
+@keyframes auraPulse {
+  0%, 100% { opacity: var(--aura-o); transform: translateX(calc(-50% + 6px)) scale(1); }
+  50% { opacity: calc(var(--aura-o) + 0.15); transform: translateX(calc(-50% + 6px)) scale(1.12); }
+}
+
 .pet-emoji-btn {
   background: none;
   border: 0;
@@ -1885,6 +1897,30 @@ textarea {
 }
 .pet-emoji-btn:hover {
   transform: scale(1.06);
+}
+/* Утке плохо: тускнеет, качается вдвое медленнее, над головой всплывает подсказка. */
+.pet-emoji-low {
+  animation-duration: 4.8s;
+  filter: drop-shadow(0 12px 16px rgba(0, 0, 0, 0.5)) saturate(0.55) brightness(0.82);
+}
+.pet-mood {
+  position: absolute;
+  top: -8px;
+  left: 50%;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  background: rgba(0, 0, 0, 0.6);
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+  pointer-events: none;
+  animation: moodFloat 2.4s ease-in-out infinite;
+}
+@keyframes moodFloat {
+  0%, 100% { transform: translate(-50%, 0); }
+  50% { transform: translate(-50%, -5px); }
 }
 .pet-emoji-levelup {
   animation: petLevelUpBounce 0.7s ease;
