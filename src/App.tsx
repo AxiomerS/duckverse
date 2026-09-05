@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, lazy, Suspense } from "react";
+import { useState, useEffect, useRef, lazy, Suspense, type CSSProperties } from "react";
 import "./App.css";
 import { RARITY, rollRarity, XP_BY_RARITY, type Rarity } from "./game/rarity";
 import { PETS, STARTER_PETS, SPECIES_PERK, speciesEffect, isBasePet, type PetId } from "./game/pets";
@@ -42,6 +42,10 @@ const NEW_SPECIES = new Set(["tiger", "dino"]);
 
 // Иконка предмета в барабане/подписи выигрыша. Обычные предметы — эмодзи,
 // утки приходят маркером "pet:<id>" и рисуются своим артом.
+// Искры на выпадении legendary и mythic: 18 частиц веером из центра барабана. Углы и дальность
+// заданы заранее, чтобы залп был одинаковым от раза к разу и не дёргал рендер случайностью.
+const SPARKS = Array.from({ length: 18 }, (_, i) => ({ angle: i * 20 + (i % 2) * 7, dist: 96 + (i % 3) * 28, delay: (i % 4) * 55 }));
+
 function ReelIcon({ v, size = 46 }: { v: string; size?: number }) {
   if (v.startsWith("pet:")) return <PetArt species={v.slice(4)} size={size} />;
   return <>{v}</>;
@@ -2930,7 +2934,14 @@ export default function App() {
       {/* ===== Chest opening (roulette) ===== */}
       {chest && (
         <div className="scrim scrim-top" onClick={() => chest.revealed && setChest(null)}>
-          <div className="chest-open" onClick={(e) => e.stopPropagation()}>
+          <div className={"chest-open" + (chest.revealed && (chest.won.rarity === "legendary" || chest.won.rarity === "mythic") ? " chest-open-" + chest.won.rarity : "")} onClick={(e) => e.stopPropagation()}>
+            {chest.revealed && (chest.won.rarity === "legendary" || chest.won.rarity === "mythic") && (
+              <div className={"chest-sparks chest-sparks-" + chest.won.rarity} aria-hidden>
+                {SPARKS.map((s, i) => (
+                  <span key={i} style={{ "--a": s.angle + "deg", "--d": s.dist + "px", "--t": s.delay + "ms", background: i % 3 === 0 ? "#fff" : chest.won.rarityColor } as CSSProperties} />
+                ))}
+              </div>
+            )}
             <div className="reel-viewport">
               <div className="reel-pointer" />
               <div className="reel-track" style={{ transform: `translateX(${reelOffset}px)` }}>
