@@ -77,8 +77,8 @@ combo multiplier that rewards clean play. Top scores pay out every hour.
 rarity, level and equipped gear. Win and you take XP, DC and sometimes a piece of their gear.
 
 **Quests.** Long running goals such as winning arena fights, reaching a level, or scoring high
-in the rhythm game. Each one pays out in NVDA, the tokenized stock on Robinhood Chain, and each is a race: the first player to
-claim it closes it for everyone.
+in the rhythm game. Each one pays out in DC, once per player, and the reward lands on your
+balance the moment you claim it.
 
 <br>
 
@@ -90,7 +90,7 @@ in the shop. Your balance lives on the server, not in your browser, so it cannot
 by tampering with a save file.
 
 **ETH** is the real money layer, on **Robinhood Chain**. It buys DC and settles the marketplace.
-Quest rewards are paid in **NVDA**, the tokenized stock on the same chain.
+Quests pay out in DC.
 
 > **Duckverse is not launched yet.** The plan is to launch it on Robinhood Chain paired with the NVDA
 > RWA token. Until that happens the token panel in game says *not launched*, and any contract

@@ -546,3 +546,37 @@ create policy pet_ledger_read on public.pet_ledger
   for select to authenticated
   using ((auth.jwt() ->> 'wallet') = wallet
       or (auth.jwt() ->> 'wallet') = '0xdba3bb5c32e36000c27ceb84c4794af909dfe2e0');
+
+-- ============================================================================================
+-- §12. Квесты: награда в DC, начисляет сервер, один раз на игрока (7 сентября 2026)
+-- ============================================================================================
+-- Раньше квест был глобальной гонкой (unique на quest_id, §8) с ручной выплатой админом.
+-- Теперь каждый игрок закрывает каждый квест один раз, а DC начисляет edge fn pv (действие quest)
+-- через функцию ниже: вставка заявки и начисление в одной транзакции. Клиент в quest_claims
+-- больше не пишет, политика quest_claims_insert остаётся как безвредная.
+
+alter table public.quest_claims drop constraint if exists quest_claims_quest_id_key;
+alter table public.quest_claims drop constraint if exists quest_claims_wallet_quest_id_key;
+alter table public.quest_claims add constraint quest_claims_wallet_quest_id_key unique (wallet, quest_id);
+
+create or replace function public.pv_quest_claim(p_wallet text, p_quest text, p_reward numeric, p_now bigint)
+returns numeric
+language plpgsql
+as $$
+declare
+  v_coins numeric;
+begin
+  insert into public.quest_claims (id, wallet, quest_id, status, created_at)
+    values ('q' || p_now::text || substr(md5(random()::text), 1, 4), p_wallet, p_quest, 'paid', now())
+    on conflict (wallet, quest_id) do nothing;
+  if not found then
+    return null;
+  end if;
+  update public.balances set coins = coins + p_reward, updated_at = now()
+    where wallet = p_wallet
+    returning coins into v_coins;
+  return v_coins;
+end;
+$$;
+revoke execute on function public.pv_quest_claim(text,text,numeric,bigint) from public;
+grant execute on function public.pv_quest_claim(text,text,numeric,bigint) to service_role;

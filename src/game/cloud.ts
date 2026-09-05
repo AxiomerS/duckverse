@@ -448,6 +448,15 @@ export async function pvSpend(amount: number): Promise<{ coins: number } | { err
   return { coins: d.coins };
 }
 // Рулетка: сервер списывает ставку, крутит RNG, начисляет выигрыш. Возвращает исход для анимации.
+// Забрать награду за квест: сервер сверяет прогресс по своим таблицам, начисляет DC и помечает
+// квест закрытым для этого кошелька (один раз на игрока). Ошибки: "quest not complete",
+// "quest already claimed", "unknown quest".
+export async function pvQuest(questId: string): Promise<{ coins: number; credited: number } | { error: string; coins?: number }> {
+  const d = await pvCall<{ coins: number; credited: number }>("quest", { quest: questId });
+  if (d.error) return { error: d.error, coins: d.coins };
+  if (typeof d.coins !== "number") return { error: BAD_REPLY };
+  return { coins: d.coins, credited: Number(d.credited) || 0 };
+}
 export async function pvRoulette(stake: number, bet: "red" | "black" | "zero"): Promise<{ coins: number; win: boolean; n: number; color: string } | { error: string; coins?: number }> {
   const d = await pvCall<{ coins: number; win: boolean; n: number; color: string }>("roulette", { stake, bet });
   if (d.error) return { error: d.error, coins: d.coins };
@@ -532,74 +541,3 @@ export async function petsCancel(id: string): Promise<{ restored: boolean; speci
   return { restored: !!d.restored, species: d.species, level: d.level, buffs: d.buffs, accessories: d.accessories, name: d.name };
 }
 
-// ===== Заявки на награды за квесты (таблица public.quest_claims) — выплата SOL вручную админом =====
-// Сумму НЕ храним в строке (клиенту не доверяем) — админ берёт её из QUESTS по quest_id.
-export type QuestClaim = { id: string; wallet: string; quest_id: string; status: string; created_at?: string };
-
-// Игрок запрашивает награду за выполненный квест. Квест теперь ГЛОБАЛЬНЫЙ (unique на quest_id
-// в БД, см. marketplace.sql §8) — побеждает первый claim, остальные получают 409.
-// "claimed" = награда закреплена за ЭТИМ кошельком (либо только что, либо повторный клик тем же
-// игроком); "taken" = 409 и claim принадлежит ДРУГОМУ кошельку — квест уже закрыт кем-то другим.
-export async function createQuestClaim(wallet: string, questId: string): Promise<"claimed" | "taken" | "error"> {
-  if (!isCloudEnabled()) return "error";
-  try {
-    const res = await fetch(`${URL}/rest/v1/quest_claims`, {
-      method: "POST",
-      headers: headers({ Prefer: "return=minimal" }),
-      body: JSON.stringify({ id: `q${Date.now()}${Math.random().toString(36).slice(2, 6)}`, wallet, quest_id: questId, status: "pending", created_at: new Date().toISOString() }),
-    });
-    if (res.ok) return "claimed";
-    if (res.status !== 409) return "error";
-    const check = await fetch(`${URL}/rest/v1/quest_claims?quest_id=eq.${encodeURIComponent(questId)}&select=wallet`, { headers: headers() });
-    if (check.ok) {
-      const rows = (await check.json()) as { wallet: string }[];
-      if (rows[0]?.wallet === wallet) return "claimed";
-    }
-    return "taken";
-  } catch {
-    return "error";
-  }
-}
-
-// Карта quest_id → кошелёк, который его закрыл (для ВСЕХ квестов, любой статус) — нужна каждому
-// игроку, чтобы видеть закрытые кем-то другим квесты, не только свои собственные заявки.
-export async function fetchClaimedQuestIds(): Promise<Record<string, string> | null> {
-  if (!isCloudEnabled()) return null;
-  try {
-    const res = await fetch(`${URL}/rest/v1/quest_claims?select=quest_id,wallet`, { headers: headers() });
-    if (!res.ok) return null;
-    const rows = (await res.json()) as { quest_id: string; wallet: string }[];
-    const map: Record<string, string> = {};
-    for (const r of rows) map[r.quest_id] = r.wallet;
-    return map;
-  } catch {
-    return null;
-  }
-}
-
-// Все заявки на награды по статусу (админ видит все — по RLS-политике). null — облако выключено/ошибка.
-export async function fetchQuestClaims(status = "pending"): Promise<QuestClaim[] | null> {
-  if (!isCloudEnabled()) return null;
-  try {
-    const res = await fetch(`${URL}/rest/v1/quest_claims?status=eq.${status}&select=*&order=created_at.asc`, { headers: headers() });
-    if (!res.ok) return null;
-    return (await res.json()) as QuestClaim[];
-  } catch {
-    return null;
-  }
-}
-
-// Отметить заявку выплаченной (только админ). SOL админ отправляет вручную из своего кошелька.
-export async function markQuestClaimPaid(id: string): Promise<boolean> {
-  if (!isCloudEnabled()) return false;
-  try {
-    const res = await fetch(`${URL}/rest/v1/quest_claims?id=eq.${encodeURIComponent(id)}`, {
-      method: "PATCH",
-      headers: headers({ Prefer: "return=minimal" }),
-      body: JSON.stringify({ status: "paid" }),
-    });
-    return res.ok;
-  } catch {
-    return false;
-  }
-}

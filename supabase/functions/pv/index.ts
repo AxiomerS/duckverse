@@ -1,7 +1,7 @@
 // Supabase Edge Function "pv": СЕРВЕРНЫЙ баланс PV (единственный источник правды).
 // БЕЗ внешних зависимостей. JWT wallet-auth (как в sell). Пишет в public.balances через service_role.
 // Клиент шлёт { action, ... } с Bearer-JWT кошелька; сервер валидирует и возвращает новый баланс.
-// Действия: sync | collect | daily | spend | roulette | battle | run-reward.
+// Действия: sync | collect | daily | spend | roulette | battle | run-reward | quest.
 const JWT_SECRET = Deno.env.get("JWT_SECRET") ?? "";
 const SB_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SERVICE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
@@ -21,6 +21,14 @@ const PLAYER_MIN = 10;                  // PV за арену включаетс
 // а не по индивидуальному кулдауну с разного момента (см. milestones/mark_milestone_once в SQL).
 const RUN_REWARD_UNLOCK_DELAY = 2 * 3600 * 1000;
 const STAKES = new Set([5, 10, 25, 50, 100, 200]);
+// Квесты (держать в синхроне с QUESTS в src/game/quests.ts). Награда в DC, один раз на кошелёк.
+const QUEST_DEFS: Record<string, { metric: string; goal: number; reward: number }> = {
+  "q-battles": { metric: "battleWins", goal: 5, reward: 350 },
+  "q-level": { metric: "level", goal: 8, reward: 650 },
+  "q-score": { metric: "bestScore", goal: 30000, reward: 250 },
+  "q-collect-v2": { metric: "ownedPets", goal: 4, reward: 300 },
+  "q-rich": { metric: "coins", goal: 2500, reward: 350 },
+};
 const RED = new Set([1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36]);
 function colorOf(n: number): "green" | "red" | "black" { return n === 0 ? "green" : RED.has(n) ? "red" : "black"; }
 function levelMult(level: number): number { return Math.min(1 + (Math.max(1, level | 0) - 1) * 0.1, MULT_CAP); }
@@ -86,6 +94,20 @@ async function rpc(fn: string, args: Record<string, unknown>): Promise<number | 
   if (v === null || v === undefined) return null;
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
+}
+
+// Прогресс по квесту глазами сервера. coins и ownedPets авторитетны (balances, pet_ledger);
+// bestScore, battleWins и level лежат в таблицах, которые пишет клиент, то есть это доверие
+// с памятью, а не проверка. Лучше, чем ничего: хотя бы нельзя заявить квест без единой записи.
+async function questMetric(wallet: string, metric: string, b: Bal): Promise<number> {
+  const enc = encodeURIComponent(wallet);
+  const get = async (path: string) => { const r = await fetch(`${SB_URL}/rest/v1/${path}`, { headers: sbHeaders() }); return r.ok ? await r.json() : []; };
+  if (metric === "coins") return Number(b.coins) || 0;
+  if (metric === "ownedPets") { const rows = await get(`pet_ledger?wallet=eq.${enc}&select=species`); return Array.isArray(rows) ? rows.length : 0; }
+  if (metric === "bestScore") { const rows = await get(`scores?wallet=eq.${enc}&select=score&order=score.desc&limit=1`); return Number(rows?.[0]?.score) || 0; }
+  if (metric === "battleWins") { const rows = await get(`arena?wallet=eq.${enc}&select=wins&order=wins.desc&limit=1`); return Number(rows?.[0]?.wins) || 0; }
+  if (metric === "level") { const rows = await get(`saves?wallet=eq.${enc}&select=data`); return Number(rows?.[0]?.data?.level) || 0; }
+  return 0;
 }
 
 // Сколько игроков в игре (кол-во сейвов). Через заголовок Content-Range (Prefer: count=exact).
@@ -182,6 +204,17 @@ Deno.serve(async (req) => {
       const reward = Math.min(40 + Math.max(1, level | 0) * 10, 200); // капим награду (level не доверяем)
       const coins = await rpc("pv_battle", { p_wallet: wallet, p_won: won, p_stake: stake, p_reward: reward, p_day: day, p_max: BATTLE_MAX_PER_DAY });
       return jsonResp({ coins: Math.floor(coins ?? b.coins) });
+    }
+
+    if (action === "quest") {
+      const questId = String(body.quest ?? "");
+      const q = QUEST_DEFS[questId];
+      if (!q) return jsonResp({ error: "unknown quest" }, 400);
+      const val = await questMetric(wallet, q.metric, b);
+      if (val < q.goal) return jsonResp({ error: "quest not complete", coins: Math.floor(b.coins) }, 409);
+      const coins = await rpc("pv_quest_claim", { p_wallet: wallet, p_quest: questId, p_reward: q.reward, p_now: now });
+      if (coins === null) return jsonResp({ error: "quest already claimed", coins: Math.floor(b.coins) }, 409);
+      return jsonResp({ coins: Math.floor(coins), credited: q.reward });
     }
 
     if (action === "run-reward") {
