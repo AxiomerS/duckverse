@@ -1501,6 +1501,12 @@ export default function App() {
   // Здоровье активного вида в pet.stats, остальных — в progress. Нет записи (не гидратирован) = считаем живым.
   const allDead = !!pet && pet.ownedSpecies.length > 0 && pet.ownedSpecies.every((sp) => (sp === pet.species ? pet.stats.health : (pet.progress[sp]?.stats.health ?? 100)) <= 0);
   const cap = pet ? statCap(pet.level) : 100; // макс fullness/happiness (растёт с уровнем)
+  // Настроение утки на сцене: стат просел до 20 (тот же порог, что у подписи mood() и у красной
+  // полоски) — утка тускнеет, качается медленнее, над головой подсказка, чего не хватает.
+  // Приоритет по опасности: здоровье, потом голод, потом скука. У мёртвой сцены нет.
+  const lowMood: "sick" | "hungry" | "sad" | null =
+    !pet || dead ? null : pet.stats.health <= 20 ? "sick" : pet.stats.fullness <= 20 ? "hungry" : pet.stats.happiness <= 20 ? "sad" : null;
+  const LOW_MOOD_LABEL = { sick: "🤒 Sick", hungry: "🍞 Hungry", sad: "😢 Sad" } as const;
   // Питомцы игрока уровня BREED_LEVEL+ — кандидаты в родители для скрещивания.
   const breedEligible = pet ? pet.ownedSpecies.filter((id) => petLevel(id) >= BREED_LEVEL) : [];
   // Активные эффекты зелий (для показа ставки Sil/мин и силы арены).
@@ -1526,6 +1532,7 @@ export default function App() {
 
   function mood(s: Stats): string {
     if (s.health <= 0) return "is very sick… take care of me!";
+    if (s.health <= 20) return "feels sick 🤒";
     if (s.fullness <= 20) return "is hungry 🍖";
     if (s.happiness <= 20) return "is bored 🥺";
     if (s.fullness >= 70 && s.happiness >= 70) return "is happy and healthy! 💛";
@@ -1730,10 +1737,14 @@ export default function App() {
             ) : (
               <>
                 <div className="pet-stage" key={pet.species}>
-                  <span className="pet-glow" style={{ background: RARITY[PETS.find((p) => p.id === pet.species)?.rarity ?? "common"].color }} />
-                  <button className={"pet-emoji-big pet-emoji-btn" + (levelUpFx ? " pet-emoji-levelup" : "")} onClick={() => { setPetMenu(true); playQwak(pet.species); }} title={`Interact with ${pet.name}`}>
+                  {(() => {
+                    const rarity = PETS.find((p) => p.id === pet.species)?.rarity ?? "common";
+                    return <span className={"pet-glow pet-glow-" + rarity} style={{ background: RARITY[rarity].color }} />;
+                  })()}
+                  <button className={"pet-emoji-big pet-emoji-btn" + (levelUpFx ? " pet-emoji-levelup" : "") + (lowMood ? " pet-emoji-low" : "")} onClick={() => { setPetMenu(true); playQwak(pet.species); }} title={`Interact with ${pet.name}`}>
                     <PetArt species={pet.species} size={110} />
                   </button>
+                  {lowMood && <span className="pet-mood">{LOW_MOOD_LABEL[lowMood]}</span>}
                   {levelUpFx && (
                     <div className="level-up-fx">
                       <span className="level-up-text">LEVEL UP!</span>
