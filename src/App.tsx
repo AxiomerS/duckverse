@@ -1315,6 +1315,9 @@ export default function App() {
     if (!pet || pet.questClaimed.includes(id)) return;
     if (!wallet || !isCloudEnabled()) return setToast("Connect your wallet to claim quest rewards");
     if (!verified) return setToast("Verify your wallet first (wallet menu)");
+    // Уровень сервер читает из облачного сейва, а тот уезжает не мгновенно: без этого Claim
+    // сразу после левелапа упирался бы в «сервер видит меньше прогресса».
+    await saveCloudSave(wallet, pet);
     const res = await pvQuest(id);
     if ("error" in res) {
       if (typeof res.coins === "number") setCoins(res.coins);
