@@ -317,6 +317,46 @@ export type Listing = {
   created_at?: string;
 };
 
+// ===== Маркетплейс за DC (edge fn market-dc) =====
+// Лоты живут в той же таблице listings с currency='dc'. Читаем их напрямую (чтение публичное),
+// а выставление, покупка и отмена идут через функцию: только она умеет двигать леджер и балансы.
+export const DCM_FEE_PCT = 5; // держать в синхроне с FEE_PCT в edge fn market-dc
+
+async function dcmCall<T>(action: string, extra: Record<string, unknown> = {}): Promise<{ error: string } | T> {
+  if (!isCloudEnabled()) return { error: "cloud off" };
+  if (!sessionToken) return { error: "no session" };
+  try {
+    const res = await fetch(`${URL}/functions/v1/market-dc`, { method: "POST", headers: headers(), body: JSON.stringify({ action, ...extra }) });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 401) { authLost(); return { error: "unauthorized" }; }
+    if (!res.ok) return { error: (data as { error?: string }).error ?? `HTTP ${res.status}` };
+    return data as T;
+  } catch (e) {
+    return { error: String(e) };
+  }
+}
+
+// Лоты за DC, новые сверху.
+export async function fetchDcListings(): Promise<Listing[] | null> {
+  if (!isCloudEnabled()) return null;
+  try {
+    const res = await fetch(`${URL}/rest/v1/listings?currency=eq.dc&select=*&order=created_at.desc`, { headers: headers() });
+    if (!res.ok) return null;
+    return (await res.json()) as Listing[];
+  } catch {
+    return null;
+  }
+}
+export async function dcmList(species: string, price: number, accessories: string[]): Promise<{ id: string } | { error: string }> {
+  return dcmCall<{ id: string }>("list", { species, price, accessories });
+}
+export async function dcmBuy(id: string): Promise<{ coins: number; species: string; accessories: string[] } | { error: string }> {
+  return dcmCall<{ coins: number; species: string; accessories: string[] }>("buy", { id });
+}
+export async function dcmCancel(id: string): Promise<{ ok: true } | { error: string }> {
+  return dcmCall<{ ok: true }>("cancel", { id });
+}
+
 // Все лоты выбранного типа (продажа/аукцион), новые сверху. null — облако выключено/ошибка.
 export async function fetchListings(kind: "sale" | "auction", limit = 100): Promise<Listing[] | null> {
   if (!isCloudEnabled()) return null;

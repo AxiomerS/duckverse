@@ -610,3 +610,109 @@ end;
 $$;
 revoke execute on function public.pv_merge_guest(text,text,numeric) from public;
 grant execute on function public.pv_merge_guest(text,text,numeric) to service_role;
+
+-- ============================================================================================
+-- §14. Маркетплейс уток за DC, между игроками (7 сентября 2026)
+-- ============================================================================================
+-- Отдельный от ETH-маркетплейса слой: тот платит настоящими деньгами и ждёт транзакцию в сети,
+-- этот платит внутриигровыми DC, которые и так лежат на сервере, поэтому вся сделка помещается
+-- в одну транзакцию. Лоты живут в той же таблице listings, различает их колонка currency:
+-- 'eth' у старых лотов (значение по умолчанию, старые строки не трогаем) и 'dc' у новых.
+-- Торговать может кто угодно с сессией, включая гостей: DC у них настоящие, свои.
+-- Комиссию площадки СЖИГАЕМ (продавцу уходит цена минус процент) — это единственный сток DC.
+
+alter table public.listings add column if not exists currency text not null default 'eth';
+create index if not exists listings_currency_idx on public.listings (currency);
+
+-- Выставить: забрать утку из леджера продавца (эскроу) и создать лот. Обе операции в одной
+-- транзакции, поэтому «продать одну утку в два лота» невозможно: второй раз её уже нет в леджере.
+create or replace function public.dcm_list(
+  p_seller text, p_id text, p_species text, p_price numeric,
+  p_level int, p_buffs jsonb, p_name text, p_accessories jsonb
+) returns boolean
+language plpgsql
+as $$
+declare
+  v_taken int;
+begin
+  if p_price is null or p_price <= 0 then
+    return false;
+  end if;
+  delete from public.pet_ledger where wallet = p_seller and species = p_species;
+  get diagnostics v_taken = row_count;
+  if v_taken = 0 then
+    return false;                       -- утки нет у продавца: подделанный сейв лот не создаст
+  end if;
+  insert into public.listings (id, seller, kind, species, level, buffs, name, accessories, price, currency, created_at)
+    values (p_id, p_seller, 'sale', p_species, p_level, coalesce(p_buffs, '[]'::jsonb), p_name,
+            coalesce(p_accessories, '[]'::jsonb), p_price, 'dc', now());
+  return true;
+end;
+$$;
+
+-- Купить: списать с покупателя (только если хватает), начислить продавцу за вычетом комиссии,
+-- передать утку, убрать лот. NULL означает «сделка не состоялась» и НИЧЕГО не меняет: и списание,
+-- и начисление, и передача откатываются вместе, потому что это одна транзакция.
+create or replace function public.dcm_buy(p_buyer text, p_id text, p_fee_pct numeric)
+returns numeric
+language plpgsql
+as $$
+declare
+  v_seller text; v_species text; v_level int; v_buffs jsonb; v_name text;
+  v_price numeric; v_cur text; v_coins numeric; v_net numeric; v_now bigint;
+begin
+  select seller, species, level, buffs, name, price, currency
+    into v_seller, v_species, v_level, v_buffs, v_name, v_price, v_cur
+    from public.listings where id = p_id for update;
+  if v_seller is null or v_cur <> 'dc' or v_seller = p_buyer then
+    return null;
+  end if;
+  if exists (select 1 from public.pet_ledger where wallet = p_buyer and species = v_species) then
+    return null;                        -- эта модель у покупателя уже есть, второй экземпляр не заводим
+  end if;
+  update public.balances set coins = coins - v_price, updated_at = now()
+    where wallet = p_buyer and coins >= v_price
+    returning coins into v_coins;
+  if v_coins is null then
+    return null;                        -- не хватает DC (или строки баланса ещё нет)
+  end if;
+  v_net := floor(v_price * (100 - p_fee_pct) / 100);
+  v_now := (extract(epoch from now()) * 1000)::bigint;
+  -- У продавца строки баланса может не быть (гость, ни разу не звавший pv) — тогда создаём её.
+  insert into public.balances (wallet, coins, last_daily, last_collect, last_run_reward, battle_day, battle_gain, updated_at)
+    values (v_seller, v_net, 0, v_now, 0, 0, 0, now())
+    on conflict (wallet) do update set coins = public.balances.coins + v_net, updated_at = now();
+  insert into public.pet_ledger (wallet, species, level, buffs, name, source)
+    values (p_buyer, v_species, v_level, coalesce(v_buffs, '[]'::jsonb), v_name, 'market');
+  delete from public.listings where id = p_id;
+  return v_coins;
+end;
+$$;
+
+-- Снять свой лот: утка возвращается продавцу, лот исчезает.
+create or replace function public.dcm_cancel(p_seller text, p_id text)
+returns boolean
+language plpgsql
+as $$
+declare
+  v_species text; v_level int; v_buffs jsonb; v_name text;
+begin
+  select species, level, buffs, name into v_species, v_level, v_buffs, v_name
+    from public.listings where id = p_id and seller = p_seller and currency = 'dc' for update;
+  if v_species is null then
+    return false;
+  end if;
+  insert into public.pet_ledger (wallet, species, level, buffs, name, source)
+    values (p_seller, v_species, v_level, coalesce(v_buffs, '[]'::jsonb), v_name, 'market')
+    on conflict (wallet, species) do nothing;
+  delete from public.listings where id = p_id;
+  return true;
+end;
+$$;
+
+revoke execute on function public.dcm_list(text,text,text,numeric,int,jsonb,text,jsonb) from public;
+revoke execute on function public.dcm_buy(text,text,numeric) from public;
+revoke execute on function public.dcm_cancel(text,text) from public;
+grant execute on function public.dcm_list(text,text,text,numeric,int,jsonb,text,jsonb) to service_role;
+grant execute on function public.dcm_buy(text,text,numeric) to service_role;
+grant execute on function public.dcm_cancel(text,text) to service_role;

@@ -15,7 +15,7 @@ import { type SavedPet, STORAGE_KEY, loadPet, hydrateSave, type MarketListing } 
 // Импорты кошелька под псевдонимами: ниже в компоненте есть свои connectWallet/disconnectWallet,
 // которые оборачивают эти низкоуровневые вызовы игровой логикой (тосты, автоверификация, сейв).
 import { getWallet, connectWallet as walletConnect, disconnectWallet as walletDisconnect, watchWallet, discoverWallets, onWalletsChanged, selectedWallet, shortAddress, signMessageHex, KNOWN_WALLETS, type WalletInfo } from "./game/wallet";
-import { isCloudEnabled, setAuthLostHandler, loadCloudSave, saveCloudSave, submitScore, fetchTopScores, submitArena, fetchTopArena, upsertPvpProfile, findPvpOpponent, battleQueuePoll, battleQueueLeave, battleQueueFinish, fetchListings, confirmMarketBuy, fetchExclusives, createExclusive, deleteExclusive, pvSync, pvDaily, pvSpend, pvRoulette, pvBattle, pvRunReward, pvQuest, isVerified, signIn, signInGuest, pvMerge, setSessionToken, confirmPurchase, requestSell, fetchSellRequests, fetchStuckSellRequests, payoutSell, petsSync, petsStarter, petsChest, petsBreed, petsList, petsCancel, type ScoreRow, type ArenaRow, type Listing, type Exclusive, type SellRequest, type LedgerPet } from "./game/cloud";
+import { isCloudEnabled, setAuthLostHandler, loadCloudSave, saveCloudSave, submitScore, fetchTopScores, submitArena, fetchTopArena, upsertPvpProfile, findPvpOpponent, battleQueuePoll, battleQueueLeave, battleQueueFinish, fetchListings, confirmMarketBuy, fetchExclusives, createExclusive, deleteExclusive, pvSync, pvDaily, pvSpend, pvRoulette, pvBattle, pvRunReward, pvQuest, isVerified, signIn, signInGuest, pvMerge, fetchDcListings, dcmList, dcmBuy, dcmCancel, DCM_FEE_PCT, setSessionToken, confirmPurchase, requestSell, fetchSellRequests, fetchStuckSellRequests, payoutSell, petsSync, petsStarter, petsChest, petsBreed, petsList, petsCancel, type ScoreRow, type ArenaRow, type Listing, type Exclusive, type SellRequest, type LedgerPet } from "./game/cloud";
 import { sendPayment, isTreasuryConfigured, ETH_PV_RATE, ETH_BUY_PACKS, ETH_SELL_RATE, ETH_SELL_PACKS, MARKET_FEE_BPS } from "./game/pay";
 import { COIN, CHAIN } from "./game/chain";
 import { SPIN_MS, playSpinSound, playWinSound, playDailySound, playModalSound } from "./game/audio";
@@ -77,7 +77,7 @@ function runRewardForRank(rank: number): number {
   return 50; // ниже топ-10 (если счёт совсем мал) — небольшой утешительный приз
 }
 
-type Modal = null | "shop" | "inventory" | "accessories" | "pets" | "leaderboard" | "roulette" | "play" | "breed" | "buysil" | "market" | "playmenu" | "pumpfun" | "battle" | "potions" | "admin" | "wallets";
+type Modal = null | "dcmarket" | "shop" | "inventory" | "accessories" | "pets" | "leaderboard" | "roulette" | "play" | "breed" | "buysil" | "market" | "playmenu" | "pumpfun" | "battle" | "potions" | "admin" | "wallets";
 
 // Кошелёк-админ: только он видит и подтверждает заявки на продажу DC.
 // ⚙️ Кошелёк админа на Robinhood Chain (0x…, НИЖНИМ регистром — адреса везде нормализуются, см.
@@ -176,6 +176,10 @@ export default function App() {
   const [adminReqs, setAdminReqs] = useState<SellRequest[] | null>(null); // pending-заявки на продажу (для админа)
   const [adminStuck, setAdminStuck] = useState<SellRequest[] | null>(null); // застрявшие выплаты (error/paying)
   const [payoutBusy, setPayoutBusy] = useState(false); // идёт обработка выплаты (блок от двойного клика Approve/Reject)
+  const [dcLots, setDcLots] = useState<Listing[] | null>(null); // лоты маркетплейса за DC
+  const [dcSpecies, setDcSpecies] = useState<string>("");       // какую утку выставляем
+  const [dcPrice, setDcPrice] = useState<string>("");           // цена лота в DC
+  const [dcBusy, setDcBusy] = useState(false);                  // идёт сделка (блок от двойного клика)
   const [listBusy, setListBusy] = useState(false); // идёт выставление лота (блок от двойного клика List)
   const isAdmin = wallet === ADMIN_WALLET;
   const [topScores, setTopScores] = useState<ScoreRow[] | null>(null); // глобальный топ лидерборда
@@ -609,6 +613,16 @@ export default function App() {
     })();
     return () => { cancelled = true; };
   }, [wallet, verified]);
+
+  // Лоты за DC: подтягиваем при открытии окна и обновляем, пока оно открыто.
+  useEffect(() => {
+    if (modal !== "dcmarket" || !isCloudEnabled()) return;
+    let cancelled = false;
+    const load = () => fetchDcListings().then((rows) => { if (!cancelled) setDcLots(rows ?? []); });
+    load();
+    const iv = setInterval(load, 15000);
+    return () => { cancelled = true; clearInterval(iv); };
+  }, [modal]);
 
   function createPet() {
     if (!picked || !name.trim()) return;
@@ -1416,6 +1430,84 @@ export default function App() {
     setListBusy(false);
   }
 
+  // Выставить утку за DC. Эскроу делает сервер: утка уходит из леджера, лот появляется в listings.
+  async function dcmSell() {
+    if (!pet || dcBusy) return;
+    const species = dcSpecies;
+    const price = Math.floor(Number(dcPrice));
+    if (!species || !pet.ownedSpecies.includes(species)) return setToast("Pick a duck to list");
+    if (species === pet.species) return setToast("Switch to another duck before listing this one");
+    if (!(price > 0)) return setToast(`Enter a price in ${SIL}`);
+    if (!playerId) return setToast("The market needs the cloud — try again in a moment");
+    setDcBusy(true);
+    const accessories = pet.progress[species]?.accessories ?? []; // едут на утке к покупателю
+    const res = await dcmList(species, price, accessories);
+    if ("error" in res) {
+      setDcBusy(false);
+      return setToast(res.error === "you don't own this duck" ? "You don't own this duck" : "Couldn't list — try again");
+    }
+    // Зеркалим у себя: вид и его аксессуары уходят, имя остаётся в names.
+    const progress = { ...pet.progress };
+    delete progress[species];
+    const next = { ...pet, progress, ownedSpecies: pet.ownedSpecies.filter((s) => s !== species), ownedAccessories: pet.ownedAccessories.filter((a) => !accessories.includes(a)), updatedAt: Date.now() };
+    setPet(next);
+    saveCloudSave(playerId, next);
+    setDcSpecies("");
+    setDcPrice("");
+    fetchDcListings().then((rows) => setDcLots(rows ?? []));
+    setDcBusy(false);
+    setToast(`🏷️ Listed for ${price} ${SIL}`);
+  }
+
+  // Купить утку за DC. Баланс и леджер меняет сервер, здесь только зеркалим результат.
+  async function dcmBuyLot(lot: Listing) {
+    if (!pet || dcBusy) return;
+    if (!playerId) return setToast("The market needs the cloud — try again in a moment");
+    setDcBusy(true);
+    const res = await dcmBuy(lot.id);
+    if ("error" in res) {
+      setDcBusy(false);
+      fetchDcListings().then((rows) => setDcLots(rows ?? []));
+      const msg = res.error === "not enough PV" ? `Not enough ${SIL}`
+        : res.error === "you already own this duck" ? "You already own this duck"
+        : res.error === "listing is gone" ? "Too late — that lot is gone"
+        : res.error === "that's your own listing" ? "That's your own listing"
+        : "Couldn't buy — try again";
+      return setToast(msg);
+    }
+    const acc = res.accessories ?? [];
+    const next = {
+      ...pet,
+      coins: res.coins,
+      ownedSpecies: pet.ownedSpecies.includes(lot.species) ? pet.ownedSpecies : [...pet.ownedSpecies, lot.species],
+      ownedAccessories: [...new Set([...pet.ownedAccessories, ...acc])],
+      names: { ...pet.names, [lot.species]: lot.name || pet.names[lot.species] || "" },
+      progress: { ...pet.progress, [lot.species]: { level: lot.level, xp: 0, stats: { fullness: 70, happiness: 70, health: 100 }, buffs: lot.buffs ?? [], accessories: acc } },
+      updatedAt: Date.now(),
+    };
+    setPet(next);
+    saveCloudSave(playerId, next);
+    fetchDcListings().then((rows) => setDcLots(rows ?? []));
+    setDcBusy(false);
+    setToast(`🐣 Bought for ${lot.price} ${SIL}`);
+  }
+
+  // Снять свой лот: сервер возвращает утку в леджер.
+  async function dcmCancelLot(lot: Listing) {
+    if (!pet || dcBusy) return;
+    setDcBusy(true);
+    const res = await dcmCancel(lot.id);
+    if ("error" in res) {
+      setDcBusy(false);
+      fetchDcListings().then((rows) => setDcLots(rows ?? []));
+      return setToast("Couldn't cancel — try again");
+    }
+    restorePet(lot.species, lot.level, lot.buffs ?? [], lot.accessories ?? [], lot.name);
+    fetchDcListings().then((rows) => setDcLots(rows ?? []));
+    setDcBusy(false);
+    setToast("↩️ Listing cancelled");
+  }
+
   // Вернуть эскроу-пета продавцу (в ownedSpecies/progress/names) вместе с его аксессуарами.
   function restorePet(species: string, level: number, buffs: { kind: BuffKind; expiresAt: number }[], accessories: string[], name?: string) {
     if (!pet || pet.ownedSpecies.includes(species)) return;
@@ -1696,8 +1788,11 @@ export default function App() {
           {CRYPTO_ON && pet && (
             <button className="buy-sil-btn" title="Exchange DC ↔ ETH" onClick={() => setModal("buysil")}>+</button>
           )}
+          {pet && (
+            <button className="market-btn" title={`Marketplace — trade ducks for ${SIL}`} onClick={() => setModal("dcmarket")}>🛍️ Market</button>
+          )}
           {CRYPTO_ON && pet && (
-            <button className="market-btn" title="Marketplace — trade items for ETH" onClick={() => setModal("market")}>🛍️ Market</button>
+            <button className="market-btn" title="Marketplace — trade items for ETH" onClick={() => setModal("market")}>Ξ Market</button>
           )}
         </div>
       </header>
@@ -2294,6 +2389,102 @@ export default function App() {
       )}
 
       {/* ===== Marketplace ===== */}
+      {modal === "dcmarket" && pet && (() => {
+        const lots = dcLots ?? [];
+        const mine = lots.filter((l) => l.seller === playerId);
+        const others = lots.filter((l) => l.seller !== playerId);
+        // Выставить можно любую свою утку, кроме активной: активная должна остаться, чтобы было кем играть.
+        const sellable = pet.ownedSpecies.filter((sp) => sp !== pet.species);
+        return (
+          <div className="scrim" onClick={() => setModal(null)}>
+            <div className="modal modal-wide" onClick={(e) => e.stopPropagation()}>
+              <div className="modal-head">
+                <h3>🛍️ Duck Market</h3>
+                <span className="coins"><Coin /> {Math.floor(pet.coins)} {SIL}</span>
+              </div>
+              <p className="subtitle" style={{ marginTop: -4 }}>
+                Trade ducks with other players for <b>{SIL}</b>. A duck brings its worn accessories with it.
+                The seller keeps {100 - DCM_FEE_PCT}% of the price.
+              </p>
+
+              <div className="section-label">Sell a duck</div>
+              {sellable.length === 0 ? (
+                <p className="empty">You only have your active duck — hatch or buy another one to sell this one.</p>
+              ) : (
+                <div className="list-controls">
+                  <select className="name-input list-select" value={dcSpecies} onChange={(e) => setDcSpecies(e.target.value)}>
+                    <option value="">Pick a duck…</option>
+                    {sellable.map((sp) => (
+                      <option key={sp} value={sp}>{pet.names[sp] || PETS.find((p) => p.id === sp)?.label || sp}</option>
+                    ))}
+                  </select>
+                  <input
+                    className="name-input list-price"
+                    type="number"
+                    min="1"
+                    step="1"
+                    placeholder={`Price in ${SIL}`}
+                    value={dcPrice}
+                    onChange={(e) => setDcPrice(e.target.value)}
+                  />
+                  <button className="btn btn-primary" disabled={dcBusy} onClick={dcmSell}>🏷️ List</button>
+                </div>
+              )}
+
+              {mine.length > 0 && (
+                <>
+                  <div className="section-label" style={{ marginTop: 14 }}>Your listings</div>
+                  <div className="inv-grid">
+                    {mine.map((l) => {
+                      const info = PETS.find((p) => p.id === l.species);
+                      return (
+                        <div key={l.id} className="inv-item inv-item-tall market-listing">
+                          {info && <span className="rar-dot" style={{ background: RARITY[info.rarity].color }} />}
+                          <span className="inv-emoji"><PetArt species={l.species} size={34} /></span>
+                          <span className="inv-name">{l.name || info?.label || l.species}</span>
+                          <span className="inv-perk">Lv {l.level}</span>
+                          <span className="inv-feed">{l.price} {SIL}</span>
+                          <button className="btn btn-ghost market-buy" disabled={dcBusy} onClick={() => dcmCancelLot(l)}>Cancel</button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+
+              <div className="section-label" style={{ marginTop: 14 }}>Ducks for sale</div>
+              {dcLots === null ? (
+                <p className="empty">Loading the market… ⏳</p>
+              ) : others.length === 0 ? (
+                <p className="empty">No ducks on sale right now — list one and be the first. 🐣</p>
+              ) : (
+                <div className="inv-grid">
+                  {others.map((l) => {
+                    const info = PETS.find((p) => p.id === l.species);
+                    const owned = pet.ownedSpecies.includes(l.species);
+                    const poor = Math.floor(pet.coins) < l.price;
+                    return (
+                      <div key={l.id} className="inv-item inv-item-tall market-listing">
+                        {info && <span className="rar-dot" style={{ background: RARITY[info.rarity].color }} />}
+                        <span className="inv-emoji"><PetArt species={l.species} size={34} /></span>
+                        <span className="inv-name">{l.name || info?.label || l.species}</span>
+                        <span className="inv-perk">Lv {l.level}{(l.accessories?.length ?? 0) > 0 ? ` · ${l.accessories!.length} worn` : ""}</span>
+                        <span className="inv-feed">{l.price} {SIL}</span>
+                        <button className="btn btn-primary market-buy" disabled={dcBusy || owned || poor} onClick={() => dcmBuyLot(l)}>
+                          {owned ? "Owned" : poor ? `Need ${SIL}` : "Buy"}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              <button className="btn btn-ghost" onClick={() => setModal(null)}>Close</button>
+            </div>
+          </div>
+        );
+      })()}
+
       {CRYPTO_ON && modal === "market" && pet && (
         <div className="scrim" onClick={() => setModal(null)}>
           <div className="modal modal-xl" onClick={(e) => e.stopPropagation()}>
