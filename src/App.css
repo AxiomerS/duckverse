@@ -2754,3 +2754,20 @@ textarea {
   box-shadow: 0 0 16px rgba(245, 130, 42, 0.28);
 }
 
+
+/* Respect the OS "reduce motion" setting: the looping stage animations (bob, aura pulse, mood
+   float) and the particle bursts are switched off. Short, player-triggered reactions like the hop
+   and the peck stay, they are under 0.6s and only run on a click. */
+@media (prefers-reduced-motion: reduce) {
+  .pet-emoji-big:not(.pet-emoji-hop):not(.pet-emoji-peck),
+  .pet-glow,
+  .pet-mood,
+  .pet-stage {
+    animation: none !important;
+  }
+  .sparks span,
+  .level-up-ring {
+    animation: none !important;
+    opacity: 0;
+  }
+}
