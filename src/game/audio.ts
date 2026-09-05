@@ -105,20 +105,6 @@ export function playDailySound() {
   }
 }
 
-// Тихое предупреждение, когда сытость/счастье падают ниже 20% — короткий нисходящий двухнотный сигнал.
-export function playLowStatSound() {
-  try {
-    const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-    const ctx = new Ctx();
-    const t = ctx.currentTime;
-    tone(ctx, 440, t, 0.12, 0.12, "sine");
-    tone(ctx, 349.23, t + 0.1, 0.18, 0.12, "sine");
-    setTimeout(() => ctx.close(), 500);
-  } catch {
-    /* аудио недоступно — игнорируем */
-  }
-}
-
 // Утешительный звук проигрыша: мягкое нисходящее «ва-ва».
 export function playLoseSound() {
   try {
