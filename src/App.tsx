@@ -10,7 +10,7 @@ import { FOOD_CHESTS, ACC_CHESTS, PET_CHESTS, bestTier, fmtChance, type PoolItem
 import { type Stats, clamp, xpForLevel, decay, decayMult, decayInactive, levelSilMult, BASE_SIL_PER_MIN, statCap, DAILY_REWARD, DAILY_COOLDOWN, START_COINS, GRANT_V } from "./game/mechanics";
 import { POTIONS, potionById, potionEffects, potionTitle, type Potion } from "./game/potions";
 import { QUESTS, QUEST_CURRENCY } from "./game/quests";
-import { CRYPTO_ON } from "./game/flags";
+import { CRYPTO_ON, DC_MARKET_ON } from "./game/flags";
 import { type SavedPet, STORAGE_KEY, loadPet, hydrateSave, type MarketListing } from "./game/save";
 // Импорты кошелька под псевдонимами: ниже в компоненте есть свои connectWallet/disconnectWallet,
 // которые оборачивают эти низкоуровневые вызовы игровой логикой (тосты, автоверификация, сейв).
@@ -616,7 +616,7 @@ export default function App() {
 
   // Лоты за DC: подтягиваем при открытии окна и обновляем, пока оно открыто.
   useEffect(() => {
-    if (modal !== "dcmarket" || !isCloudEnabled()) return;
+    if (!DC_MARKET_ON || modal !== "dcmarket" || !isCloudEnabled()) return;
     let cancelled = false;
     const load = () => fetchDcListings().then((rows) => { if (!cancelled) setDcLots(rows ?? []); });
     load();
@@ -1788,8 +1788,8 @@ export default function App() {
           {CRYPTO_ON && pet && (
             <button className="buy-sil-btn" title="Exchange DC ↔ ETH" onClick={() => setModal("buysil")}>+</button>
           )}
-          {pet && (
-            <button className="market-btn" title={`Marketplace — trade ducks for ${SIL}`} onClick={() => setModal("dcmarket")}>🛍️ Market</button>
+          {DC_MARKET_ON && pet && (
+            <button className="market-btn" title={`Marketplace: trade ducks for ${SIL}`} onClick={() => setModal("dcmarket")}>🛍️ Market</button>
           )}
           {CRYPTO_ON && pet && (
             <button className="market-btn" title="Marketplace — trade items for ETH" onClick={() => setModal("market")}>Ξ Market</button>
@@ -2389,7 +2389,7 @@ export default function App() {
       )}
 
       {/* ===== Marketplace ===== */}
-      {modal === "dcmarket" && pet && (() => {
+      {DC_MARKET_ON && modal === "dcmarket" && pet && (() => {
         const lots = dcLots ?? [];
         const mine = lots.filter((l) => l.seller === playerId);
         const others = lots.filter((l) => l.seller !== playerId);
