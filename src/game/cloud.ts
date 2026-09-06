@@ -243,7 +243,7 @@ export type BattleQueueResult = { status: "waiting" | "matched"; matchId: string
 // Один "тик" очереди: встать/остаться в очереди + попытаться забрать пару. Вызывать раз в 1.5-2с,
 // пока идёт поиск. null — облако выключено/ошибка сети (клиент должен трактовать как "ещё жду").
 export async function battleQueuePoll(fighter: { name: string; species: string; level: number; accessories: string[]; bet: number }): Promise<BattleQueueResult | null> {
-  if (!isCloudEnabled()) return null;
+  if (!isCloudEnabled() || !sessionToken) return null; // очередь арены только для верифицированных
   try {
     const res = await fetch(`${URL}/functions/v1/battle-live`, {
       method: "POST",
@@ -260,7 +260,7 @@ export async function battleQueuePoll(fighter: { name: string; species: string; 
 
 // Выйти из очереди (отмена поиска / истёк дедлайн на клиенте — переходим на async/bot).
 export async function battleQueueLeave(): Promise<void> {
-  if (!isCloudEnabled()) return;
+  if (!isCloudEnabled() || !sessionToken) return; // очередь арены только для верифицированных
   try {
     await fetch(`${URL}/functions/v1/battle-live`, { method: "POST", headers: headers(), body: JSON.stringify({ action: "leave" }) });
   } catch {
@@ -270,7 +270,7 @@ export async function battleQueueLeave(): Promise<void> {
 
 // Убрать обе стороны матча из очереди после того как бой отыгран.
 export async function battleQueueFinish(matchId: string): Promise<void> {
-  if (!isCloudEnabled()) return;
+  if (!isCloudEnabled() || !sessionToken) return; // очередь арены только для верифицированных
   try {
     await fetch(`${URL}/functions/v1/battle-live`, { method: "POST", headers: headers(), body: JSON.stringify({ action: "finish", matchId }) });
   } catch {
@@ -407,6 +407,8 @@ async function pvCall<T>(action: string, extra: Record<string, unknown> = {}): P
   // Путь ошибки не несёт полей T, но доказать это дженерику TS не может — отсюда приведение.
   const fail = (error: string, coins?: number) => ({ error, coins }) as EdgeReply<T>;
   if (!isCloudEnabled()) return fail("cloud off");
+  // Все действия pv требуют JWT кошелька; без него сервер ответит 401, а консоль засорится ошибкой.
+  if (!sessionToken) return fail("no session");
   try {
     const res = await fetch(`${URL}/functions/v1/pv`, { method: "POST", headers: headers(), body: JSON.stringify({ action, ...extra }) });
     const data = (await res.json().catch(() => ({}))) as EdgeReply<T>;

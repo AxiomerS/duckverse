@@ -428,7 +428,7 @@ export default function App() {
           submitArena({ wallet, name: p.name, species: p.species, power: loadoutPower(p.level, p.accessories, 0, speciesRarity(p.species)).power, wins: p.battleWins, losses: p.battleLosses });
         if (p) upsertPvpProfile({ wallet, name: p.name, species: p.species, level: p.level, accessories: p.accessories }); // профиль для PvP
         // Авторитетный баланс DC с сервера (начисляет пассив + бэкфилл). Требует верификации (JWT).
-        if (p) pvSync(p.level).then((r) => { if (r && !cancelled) setPet((pp) => (pp ? { ...pp, coins: r.coins, lastDaily: r.lastDaily } : pp)); });
+        if (p && isVerified()) pvSync(p.level).then((r) => { if (r && !cancelled) setPet((pp) => (pp ? { ...pp, coins: r.coins, lastDaily: r.lastDaily } : pp)); });
       })
       .finally(() => { if (!cancelled) setCloudLoading(false); });
     return () => { cancelled = true; };
@@ -1854,7 +1854,7 @@ export default function App() {
                   <button className="btn btn-secondary" onClick={() => setModal("leaderboard")}>🏆 Ranks</button>
                 </div>
 
-                <button className={"btn btn-daily" + (dailyReady && rewardsUnlocked ? " btn-daily-ready" : "")} disabled={!dailyReady || !rewardsUnlocked} onClick={claimDaily} title={!rewardsUnlocked ? "Connect & verify your wallet to claim daily rewards" : undefined}>
+                <button className={"btn btn-daily" + (dailyReady && rewardsUnlocked ? " btn-daily-ready" : "")} disabled={rewardsUnlocked && !dailyReady} onClick={rewardsUnlocked ? claimDaily : () => setToast("Connect & verify your wallet to claim daily rewards")} title={!rewardsUnlocked ? "Connect & verify your wallet to claim daily rewards" : undefined}>
                   {rewardsUnlocked && !dailyReady && (
                     <span className="btn-daily-fill" style={{ width: `${dailyProgressPct()}%` }} />
                   )}
@@ -1872,6 +1872,7 @@ export default function App() {
       <footer className="footer">Duckverse · made on Robinhood Chain · Microduck by Pollen Robotics</footer>
 
       {/* ===== Social links (bottom-left) ===== */}
+      {!modal && !petMenu && (
       <div className="social-bar">
         <a className="social-btn" href={LINK_TWITTER} target="_blank" rel="noreferrer" title="X (Twitter)" aria-label="X">𝕏</a>
         <a className="social-btn social-github" href={LINK_GITHUB} target="_blank" rel="noreferrer" title="Source on GitHub" aria-label="GitHub">
@@ -1882,6 +1883,7 @@ export default function App() {
           <span className="social-pons-label">Trade Duckverse ↗</span>
         </button>
       </div>
+      )}
 
       {/* ===== Quests (bottom-right, collapsible) ===== */}
       {pet && !dead && !modal && !petMenu && (activeQuests.length > 0 || doneQuests.length > 0 || closedQuests.length > 0) && (
@@ -2292,7 +2294,7 @@ export default function App() {
             <div className="modal-head">
               <h3>🛍️ Marketplace</h3>
             </div>
-            <p className="subtitle" style={{ marginTop: -4 }}>Buy and sell pets for real <b>ETH</b> — paid straight from your wallet.</p>
+            <p className="subtitle" style={{ marginTop: -4 }}>Buy and sell ducks for real <b>ETH</b> — paid straight from your wallet.</p>
             <div className="market-tabs">
               <button className={"market-tab" + (marketTab === "exclusive" ? " market-tab-on" : "")} onClick={() => setMarketTab("exclusive")}>✨ Exclusive</button>
               <button className={"market-tab" + (marketTab === "player" ? " market-tab-on" : "")} onClick={() => setMarketTab("player")}>👥 Player</button>
@@ -2308,7 +2310,7 @@ export default function App() {
                   {isAdmin && (
                     <>
                       <div className="section-label">Add an exclusive (admin)</div>
-                      <p className="subtitle" style={{ marginTop: -4 }}>Drop a limited pet the community can only buy here, for ETH.</p>
+                      <p className="subtitle" style={{ marginTop: -4 }}>Drop a limited duck the community can only buy here, for ETH.</p>
                       <div className="list-controls">
                         <select className="name-input list-select" value={exSpecies} onChange={(e) => setExSpecies(e.target.value)}>
                           <option value="">Choose a species…</option>
@@ -2321,7 +2323,7 @@ export default function App() {
                     </>
                   )}
 
-                  <div className="section-label">Exclusive pets</div>
+                  <div className="section-label">Exclusive ducks</div>
                   <p className="subtitle" style={{ marginTop: -4 }}>Limited ducks sold for <b>ETH</b> by Duckverse — grab them before they're gone.</p>
                   {loading ? (
                     <p className="empty">Loading exclusives… ⏳</p>
@@ -2376,7 +2378,7 @@ export default function App() {
                   {cloud && !wallet ? (
                     <p className="empty">🔌 Connect your wallet to list a duck on the market.</p>
                   ) : listable.length === 0 ? (
-                    <p className="empty">Switch to another pet first — you can't sell your active one.</p>
+                    <p className="empty">Switch to another duck first — you can't sell your active one.</p>
                   ) : (
                     <div className="list-controls">
                       <select className="name-input list-select" value={listSpecies} onChange={(e) => setListSpecies(e.target.value)}>
@@ -2443,7 +2445,7 @@ export default function App() {
             {marketTab === "auction" && (
               <div className="market-empty">
                 <div className="market-empty-emoji">🔨</div>
-                <p className="empty">Live ETH auctions are coming soon — bid on rare pets and win them. Stay tuned!</p>
+                <p className="empty">Live ETH auctions are coming soon — bid on rare ducks and win them. Stay tuned!</p>
               </div>
             )}
 
@@ -2640,7 +2642,7 @@ export default function App() {
         <div className="scrim" onClick={() => setModal(null)}>
           <div className="modal modal-wide" onClick={(e) => e.stopPropagation()}>
             <div className="modal-head"><h3>🛠️ Payout requests</h3></div>
-            <p className="subtitle" style={{ marginTop: -4 }}>Approve to pay ETH from the treasury. Only DC sells can be rejected (refunds DC); pet sales &amp; refunds are final.</p>
+            <p className="subtitle" style={{ marginTop: -4 }}>Approve to pay ETH from the treasury. Only DC sells can be rejected (refunds DC); duck sales &amp; refunds are final.</p>
             {adminReqs === null ? (
               <p className="empty">Loading…</p>
             ) : adminReqs.length === 0 ? (
@@ -2736,11 +2738,11 @@ export default function App() {
               </div>
             ) : breedEligible.length < 2 ? (
               <p className="empty">
-                Breeding unlocks when you have two pets at level {BREED_LEVEL}. You have {breedEligible.length}. Level pets up by feeding them 🍖
+                Breeding unlocks when you have two ducks at level {BREED_LEVEL}. You have {breedEligible.length}. Level ducks up by feeding them 🍖
               </p>
             ) : (
               <>
-                <p className="subtitle" style={{ marginTop: -4 }}>Pick two level-{BREED_LEVEL}+ pets — breed a new one (rare → mythic).</p>
+                <p className="subtitle" style={{ marginTop: -4 }}>Pick two level-{BREED_LEVEL}+ ducks — breed a new one (rare → mythic).</p>
                 <div className="inv-grid">
                   {breedEligible.map((id) => {
                     const info = PETS.find((p) => p.id === id)!;
@@ -2803,7 +2805,7 @@ export default function App() {
         <div className="scrim" onClick={() => setModal(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-head">
-              <h3>Your pets</h3>
+              <h3>Your ducks</h3>
               <span className="coins">{collectiblePets.filter((p) => pet.ownedSpecies.includes(p.id)).length}/{collectiblePets.length}</span>
             </div>
             <p className="subtitle" style={{ marginTop: -4 }}>Tap to switch. Each duck has a unique perk — locked ones drop from the Duck Chest 🥚</p>
