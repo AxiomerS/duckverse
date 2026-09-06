@@ -514,3 +514,35 @@ create policy pet_ledger_read on public.pet_ledger
   for select to authenticated
   using ((auth.jwt() ->> 'wallet') = wallet
       or (auth.jwt() ->> 'wallet') = '0x69c159cdf7d5264f380c69f68847f806d84ef080');
+
+-- ============================================================================================
+-- §11. Смена админского кошелька (6 сентября 2026)
+-- ============================================================================================
+-- Казна и админ переехали на новые адреса перед выходом игры. Казна в RLS не участвует, она
+-- зашита в edge-функциях buy / market-buy / evmtest и в src/game/pay.ts. Админ участвует в четырёх
+-- политиках ниже; они пересоздаются с новым адресом. Должен совпадать с ADMIN_WALLET (src/App.tsx)
+-- и ADMIN (edge fn sell-payout). Адрес НИЖНИМ регистром, как его кладёт в JWT edge fn auth.
+
+drop policy if exists exclusives_admin_write on public.exclusives;
+create policy exclusives_admin_write on public.exclusives
+  for all to authenticated
+  using ((auth.jwt() ->> 'wallet') = '0xdba3bb5c32e36000c27ceb84c4794af909dfe2e0')
+  with check ((auth.jwt() ->> 'wallet') = '0xdba3bb5c32e36000c27ceb84c4794af909dfe2e0');
+
+drop policy if exists quest_claims_admin_update on public.quest_claims;
+create policy quest_claims_admin_update on public.quest_claims
+  for update to authenticated
+  using ((auth.jwt() ->> 'wallet') = '0xdba3bb5c32e36000c27ceb84c4794af909dfe2e0')
+  with check ((auth.jwt() ->> 'wallet') = '0xdba3bb5c32e36000c27ceb84c4794af909dfe2e0');
+
+drop policy if exists balances_read on public.balances;
+create policy balances_read on public.balances
+  for select to authenticated
+  using ((auth.jwt() ->> 'wallet') = wallet
+      or (auth.jwt() ->> 'wallet') = '0xdba3bb5c32e36000c27ceb84c4794af909dfe2e0');
+
+drop policy if exists pet_ledger_read on public.pet_ledger;
+create policy pet_ledger_read on public.pet_ledger
+  for select to authenticated
+  using ((auth.jwt() ->> 'wallet') = wallet
+      or (auth.jwt() ->> 'wallet') = '0xdba3bb5c32e36000c27ceb84c4794af909dfe2e0');

@@ -7,7 +7,7 @@
 //     exclusive → уменьшаем сток эксклюзива и выдаём пета покупателю (ETH остаётся у казны).
 const RPC = Deno.env.get("RH_RPC_URL") ?? "https://rpc.mainnet.chain.robinhood.com";
 // ⚙️ Казна на Robinhood Chain (0x…, нижним регистром). Нулевой адрес → оплаты отклоняются (предохранитель).
-const TREASURY = "0x3b51dbd73fe5d9d95c2b228f1642e0ffaa592246";
+const TREASURY = "0xd47bee53a643c7688aa9ef417aaf3f283a22c469";
 const WEI_PER_ETH = 1000000000000000000n;
 const FEE_BPS = 500; // 5% комиссия казны с продажи между игроками
 const SB_URL = Deno.env.get("SUPABASE_URL") ?? "";

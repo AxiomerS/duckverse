@@ -13,7 +13,7 @@ const RPC = Deno.env.get("RH_RPC_URL") ?? "https://rpc.mainnet.chain.robinhood.c
 // ⚙️ Кошелёк админа на Robinhood Chain (0x…, НИЖНИМ регистром — сверяется с claim из JWT, который
 // auth тоже приводит к нижнему регистру). Должен совпадать с ADMIN_WALLET в App.tsx и с адресом
 // в RLS-политиках (см. marketplace.sql §10). Нулевой адрес → функция никого не пустит.
-const ADMIN = "0x69c159cdf7d5264f380c69f68847f806d84ef080";
+const ADMIN = "0xdba3bb5c32e36000c27ceb84c4794af909dfe2e0";
 const MAX_PAYOUT_ETH = 0.25; // предохранитель: авто-выплату больше этого казна не отправит (≈ прежние 5 SOL)
 const JWT_SECRET = Deno.env.get("JWT_SECRET") ?? "";
 const SB_URL = Deno.env.get("SUPABASE_URL") ?? "";

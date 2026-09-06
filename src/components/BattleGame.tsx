@@ -22,32 +22,6 @@ const BET_OPTIONS = [0, 25, 50, 100, 200];
 const INTRO_MS = 2600; // сколько держим экран "pet1 VS pet2" перед рулеткой (кто бьёт первым)
 const FLIP_MS = 4000; // длительность рулетки "кто бьёт первым" — держать в синхроне с .bt-arrow transition в App.css
 
-// Ранкинг арены — топ-игроки (локальный/фейковый; настоящий глобальный лист будет с бэкендом).
-// У каждого — винрейт и лучший питомец с его силой.
-type ArenaPlayer = { name: string; wins: number; losses: number; species: string; power: number };
-const ARENA_PLAYERS: ArenaPlayer[] = [
-  { name: "GoldenQwak", wins: 312, losses: 21, species: "dragon", power: 690 },
-  { name: "ObsidianBill", wins: 288, losses: 26, species: "dino", power: 655 },
-  { name: "VoltWing", wins: 254, losses: 33, species: "tiger", power: 610 },
-  { name: "PrismQuack", wins: 240, losses: 40, species: "unicorn", power: 585 },
-  { name: "ChromeBeak", wins: 221, losses: 44, species: "lion", power: 560 },
-  { name: "EmberBeak", wins: 198, losses: 52, species: "fox", power: 520 },
-  { name: "TurboSprout", wins: 176, losses: 58, species: "frog", power: 480 },
-  { name: "PixelTux", wins: 160, losses: 66, species: "panda", power: 455 },
-  { name: "MidnightQwak", wins: 143, losses: 71, species: "owl", power: 420 },
-  { name: "BassDrop", wins: 128, losses: 79, species: "rabbit", power: 390 },
-  { name: "FrostFeather", wins: 112, losses: 84, species: "penguin", power: 360 },
-  { name: "CarbonByte", wins: 98, losses: 90, species: "cat", power: 330 },
-  { name: "ScoutUnit01", wins: 84, losses: 92, species: "dog", power: 300 },
-  { name: "SunnyBolt", wins: 71, losses: 95, species: "hamster", power: 275 },
-  { name: "LuckyChrome", wins: 63, losses: 101, species: "lion", power: 250 },
-  { name: "StormVolt", wins: 52, losses: 108, species: "tiger", power: 225 },
-  { name: "MistyEmber", wins: 44, losses: 115, species: "fox", power: 200 },
-  { name: "EchoNight", wins: 37, losses: 121, species: "owl", power: 180 },
-  { name: "RookieDuck", wins: 25, losses: 130, species: "dog", power: 150 },
-  { name: "NewbieQwak", wins: 12, losses: 140, species: "cat", power: 120 },
-];
-
 type Phase = "loadout" | "searching" | "intro" | "flip" | "battle" | "done";
 type Fighter = { name: string; species: string; level: number; accessories: string[] } & Loadout;
 // bot — случайный фейковый соперник; async — снимок профиля реального игрока (он об этом не знает);
@@ -365,10 +339,9 @@ export function BattleGame({ onClose, onWin, onWinNoLoot, onLose, petName, petSp
               rows.push({ key: myWallet, name: petName, wins, losses, species: petSpecies, power: loadout.power, you: true });
             }
           } else {
+            // Облако выключено: чужих бойцов нет, в таблице только сам игрок, и только если уже дрался.
             const me: Row = { key: "you", name: petName, wins, losses, species: petSpecies, power: loadout.power, you: true };
-            rows = [...ARENA_PLAYERS.map((p) => ({ key: p.name, name: p.name, wins: p.wins, losses: p.losses, species: p.species, power: p.power, you: false })), me]
-              .sort((a, b) => b.wins - a.wins || b.power - a.power)
-              .slice(0, 20);
+            rows = wins + losses > 0 ? [me] : [];
           }
           return (
             <div className="bt-ranks">

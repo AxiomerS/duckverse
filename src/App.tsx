@@ -67,21 +67,6 @@ function ReelIcon({ v, size = 46 }: { v: string; size?: number }) {
   return <>{v}</>;
 }
 
-// Соперники в лидерборде — лучшие забеги в ритм-игре (локальные/фейковые;
-// для настоящего глобального борда «от игроков» нужен бэкенд — следующий большой шаг).
-const LEADERBOARD_BOTS = [
-  { name: "RhythmKing", score: 18420 },
-  { name: "DragonLord", score: 15240 },
-  { name: "feese_whale", score: 12980 },
-  { name: "MoonPup", score: 10120 },
-  { name: "PixelFox", score: 8270 },
-  { name: "SolHamster", score: 6150 },
-  { name: "TinyDino", score: 4300 },
-  { name: "LuckyFrog", score: 2710 },
-  { name: "NoobPenguin", score: 1180 },
-  { name: "Starter123", score: 540 },
-];
-
 // Почасовая награда за топ-забег по рангу в лидерборде.
 const RUN_REWARD_COOLDOWN = 3_600_000; // 1 час
 function runRewardForRank(rank: number): number {
@@ -97,10 +82,11 @@ type Modal = null | "shop" | "inventory" | "accessories" | "pets" | "leaderboard
 // ⚙️ Кошелёк админа на Robinhood Chain (0x…, НИЖНИМ регистром — адреса везде нормализуются, см.
 // normalizeAddress в wallet.ts). Держать в синхроне с ADMIN в edge fn sell-payout и с адресом в
 // RLS-политиках (marketplace.sql §10). Нулевой адрес → админ-панель не откроется никому (предохранитель).
-const ADMIN_WALLET = "0x69c159cdf7d5264f380c69f68847f806d84ef080";
+const ADMIN_WALLET = "0xdba3bb5c32e36000c27ceb84c4794af909dfe2e0";
 
 // Внешние ссылки проекта (TODO: заменить на финальные).
-const LINK_TWITTER = "https://x.com/PetaVerse_rh";
+const LINK_TWITTER = "https://x.com/DuckVerseNVDA";
+const LINK_GITHUB = "https://github.com/AxiomerS/duckverse";
 const LINK_LAUNCHPAD = "https://www.ponsfamily.com/launchpad";
 // Контракт токена Duckverse. ПУСТО, пока токен не запущен — здесь раньше стоял адрес $PV (PetaVerse) из
 // родительского проекта: это ДРУГОЙ токен, и показывать его как наш нельзя. Вписывать адрес
@@ -1888,8 +1874,12 @@ export default function App() {
       {/* ===== Social links (bottom-left) ===== */}
       <div className="social-bar">
         <a className="social-btn" href={LINK_TWITTER} target="_blank" rel="noreferrer" title="X (Twitter)" aria-label="X">𝕏</a>
-        <button className="social-btn social-pons" title="Duckverse on Pons Family" aria-label="Duckverse on Pons Family" onClick={() => setModal("pumpfun")}>
+        <a className="social-btn social-github" href={LINK_GITHUB} target="_blank" rel="noreferrer" title="Source on GitHub" aria-label="GitHub">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z" /></svg>
+        </a>
+        <button className="social-btn social-pons" title="Trade Duckverse on Pons Family" aria-label="Trade Duckverse on Pons Family" onClick={() => setModal("pumpfun")}>
           <img src="/pons.png" alt="" width={22} height={22} />
+          <span className="social-pons-label">Trade Duckverse ↗</span>
         </button>
       </div>
 
@@ -2182,11 +2172,9 @@ export default function App() {
           const idx = wallet ? topScores!.findIndex((r) => r.wallet === wallet) : -1;
           myRank = idx >= 0 ? idx + 1 : 0;
         } else {
-          rows = [
-            ...LEADERBOARD_BOTS.map((b) => ({ key: b.name, name: b.name, score: b.score, you: false })),
-            { key: "you", name: pet.name, score: pet.bestScore, you: true },
-          ].sort((a, b) => b.score - a.score);
-          myRank = rows.findIndex((r) => r.you) + 1;
+          // Облако выключено: чужих результатов нет, в таблице только свой лучший забег.
+          rows = pet.bestScore > 0 ? [{ key: "you", name: pet.name, score: pet.bestScore, you: true }] : [];
+          myRank = rows.length;
         }
         const inTop = myRank > 0;
         const reward = inTop ? runRewardForRank(myRank) : pet.bestScore > 0 ? 50 : 0;

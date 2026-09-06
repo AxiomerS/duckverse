@@ -13,7 +13,7 @@ const TREASURY_SECRET = Deno.env.get("TREASURY_SECRET") ?? "";
 const JWT_SECRET = Deno.env.get("JWT_SECRET") ?? "";
 
 // Должно совпадать с TREASURY в pay.ts / buy / market-buy и ADMIN в sell-payout.
-const EXPECTED_TREASURY = "0x3b51dbd73fe5d9d95c2b228f1642e0ffaa592246";
+const EXPECTED_TREASURY = "0xd47bee53a643c7688aa9ef417aaf3f283a22c469";
 const RH_CHAIN_ID = 4663;
 
 const cors = {

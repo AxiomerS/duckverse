@@ -8,7 +8,7 @@
 // платный эндпоинт в секрет RH_RPC_URL (в коде хардкодить URL с ключом НЕЛЬЗЯ: репозиторий публичный).
 const RPC = Deno.env.get("RH_RPC_URL") ?? "https://rpc.mainnet.chain.robinhood.com";
 // ⚙️ Казна на Robinhood Chain (0x…, нижним регистром). Нулевой адрес → оплаты отклоняются (предохранитель).
-const TREASURY = "0x3b51dbd73fe5d9d95c2b228f1642e0ffaa592246";
+const TREASURY = "0xd47bee53a643c7688aa9ef417aaf3f283a22c469";
 const RATE = 180000; // 1 ETH → 180 000 PV (пересчитано с прежних 7 500 PV за SOL по цене ETH/SOL)
 const WEI_PER_ETH = 1000000000000000000n;
 const SB_URL = Deno.env.get("SUPABASE_URL") ?? "";
