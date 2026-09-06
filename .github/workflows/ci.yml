@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Отменяем предыдущий прогон на той же ветке: смысла добивать устаревший коммит нет.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      # Настоящий гейт: tsc -b проверяет типы, vite build собирает продакшен.
+      # Сборка строгая (noUnusedLocals), так что неиспользуемый импорт уронит её здесь.
+      - name: Build
+        run: npm run build
+
+      # Линт пока справочный, не блокирующий: в проекте 60 унаследованных замечаний
+      # (react-hooks/refs в канвасной ритм-игре, no-explicit-any в Deno-функциях).
+      # Когда их разберём, отсюда уйдёт continue-on-error и линт станет вторым гейтом.
+      - name: Lint (informational)
+        run: npm run lint
+        continue-on-error: true
