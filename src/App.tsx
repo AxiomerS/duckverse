@@ -77,7 +77,7 @@ function runRewardForRank(rank: number): number {
   return 50; // ниже топ-10 (если счёт совсем мал) — небольшой утешительный приз
 }
 
-type Modal = null | "dcmarket" | "shop" | "inventory" | "accessories" | "pets" | "leaderboard" | "roulette" | "play" | "breed" | "buysil" | "market" | "playmenu" | "pumpfun" | "battle" | "potions" | "admin" | "wallets";
+type Modal = null | "account" | "dcmarket" | "shop" | "inventory" | "accessories" | "pets" | "leaderboard" | "roulette" | "play" | "breed" | "buysil" | "market" | "playmenu" | "pumpfun" | "battle" | "potions" | "admin" | "wallets";
 
 // Кошелёк-админ: только он видит и подтверждает заявки на продажу DC.
 // ⚙️ Кошелёк админа на Robinhood Chain (0x…, НИЖНИМ регистром — адреса везде нормализуются, см.
@@ -108,7 +108,15 @@ function jwtExpMs(token: string): number {
 // видит транзакцию (частый кейс на mainnet при загрузке), подтверждение повторяется — в сессии и при
 // следующем заходе. Всё идемпотентно (подпись — PK), поэтому деньги не теряются и не зачисляются дважды.
 const PENDING_KEY = "duckverse.pending";
-const GUEST_KEY = "duckverse.guest";          // гостевая сессия: { id, token }
+const GUEST_KEY = "duckverse.guest";
+// Гостевой id это и есть код игрока: кто его знает, тот и владелец аккаунта. Показываем его
+// группами по четыре символа, чтобы можно было переписать с экрана, а на вводе чистим всё лишнее.
+function prettyCode(id: string): string {
+  return (id.slice(0, 1) + " " + (id.slice(1).match(/.{1,4}/g) ?? []).join(" ")).toUpperCase();
+}
+function normalizeCode(input: string): string {
+  return input.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+}          // гостевая сессия: { id, token }
 const DAILY_DEVICE_KEY = "duckverse.dailyAt"; // когда на ЭТОМ устройстве брали дейли, независимо от кошелька
 // wallet = реальный плательщик (адрес, вернувшийся из sendPayment) — НЕ читаем текущее состояние
 // "wallet" при сверке: если пользователь переключит аккаунт в your wallet между оплатой и подтверждением,
@@ -176,6 +184,8 @@ export default function App() {
   const [adminReqs, setAdminReqs] = useState<SellRequest[] | null>(null); // pending-заявки на продажу (для админа)
   const [adminStuck, setAdminStuck] = useState<SellRequest[] | null>(null); // застрявшие выплаты (error/paying)
   const [payoutBusy, setPayoutBusy] = useState(false); // идёт обработка выплаты (блок от двойного клика Approve/Reject)
+  const [codeInput, setCodeInput] = useState("");   // код игрока, введённый для восстановления
+  const [codeBusy, setCodeBusy] = useState(false);
   const [dcLots, setDcLots] = useState<Listing[] | null>(null); // лоты маркетплейса за DC
   const [dcSpecies, setDcSpecies] = useState<string>("");       // какую утку выставляем
   const [dcPrice, setDcPrice] = useState<string>("");           // цена лота в DC
@@ -614,6 +624,35 @@ export default function App() {
     return () => { cancelled = true; };
   }, [wallet, verified]);
 
+  // Восстановить прогресс по коду игрока: берём у сервера токен для этого id и переключаемся
+  // на него. Дальше эффект загрузки сейва сам подтянет утку, баланс и леджер этого аккаунта.
+  async function restoreByCode() {
+    const code = normalizeCode(codeInput);
+    if (!/^g[0-9a-f]{24}$/.test(code)) return setToast("That doesn't look like a player code");
+    if (code === guestId) return setToast("That's the code you're already playing under");
+    if (codeBusy) return;
+    setCodeBusy(true);
+    let prev: { id?: string; token?: string } | null = null;
+    try { prev = JSON.parse(localStorage.getItem(GUEST_KEY) ?? "null"); } catch { /* нет сессии */ }
+    const r = await signInGuest(code);
+    if (!r) { setCodeBusy(false); return setToast("Couldn't restore — check the code and try again"); }
+    // Читаем сейв чужого аккаунта уже его токеном. Если там пусто, откатываем сессию назад и
+    // НИЧЕГО не пишем: иначе текущая утка затёрла бы аккаунт, который игрок хотел вернуть.
+    setSessionToken(r.token);
+    const cloud = await loadCloudSave(code);
+    setCodeBusy(false);
+    if (!cloud) {
+      setSessionToken(prev?.token ?? null);
+      return setToast("No progress saved under that code");
+    }
+    try { localStorage.setItem(GUEST_KEY, JSON.stringify(r)); } catch { /* приватный режим */ }
+    setGuestId(r.id);
+    setPet(hydrateSave(cloud));
+    setCodeInput("");
+    setModal(null);
+    setToast("👤 Progress restored");
+  }
+
   // Лоты за DC: подтягиваем при открытии окна и обновляем, пока оно открыто.
   useEffect(() => {
     if (!DC_MARKET_ON || modal !== "dcmarket" || !isCloudEnabled()) return;
@@ -626,7 +665,7 @@ export default function App() {
 
   function createPet() {
     if (!picked || !name.trim()) return;
-    setPet({
+    const fresh = {
       species: picked,
       name: name.trim(),
       names: { [picked]: name.trim() },
@@ -656,12 +695,19 @@ export default function App() {
       battleLosses: 0,
       grantV: GRANT_V,
       updatedAt: Date.now(),
-    });
+    };
+    setPet(fresh);
+    // Сразу заливаем в облако: иначе до первого автосейва (20 с) аккаунта в облаке нет, и код
+    // игрока ведёт в пустоту, а восстановление по нему нечего было бы возвращать.
+    if (playerId && isCloudEnabled()) saveCloudSave(playerId, fresh);
     // Phase 2: стартовый питомец выдаётся сервером в pet_ledger (если кошелёк уже верифицирован;
     // иначе засеется позже при синхронизации леджера). ownedSpecies в сейве — лишь зеркало.
     if (playerId && isCloudEnabled()) petsStarter(picked, name.trim());
     playQwak(picked);
     setToast(`Qwak! ${name.trim()} is awake 🦆`);
+    // Прогресс гостя держится на коде в этом браузере — напоминаем сохранить его один раз,
+    // сразу после создания утки, пока терять ещё нечего.
+    if (!wallet) setTimeout(() => setToast("👤 Save your player code so you can get this duck back"), 2600);
   }
 
 
@@ -1748,6 +1794,9 @@ export default function App() {
           <span className="tagline">{CRYPTO_ON ? "your onchain duck world" : "your very own duck world"}</span>
         </div>
         <div className="topbar-right">
+          {guestId && !(wallet && verified) && (
+            <button className="wallet-btn" title="Your player code" onClick={() => setModal("account")}>👤 Account</button>
+          )}
           {CRYPTO_ON && (
           <div className="wallet-wrap">
             {wallet ? (
@@ -2389,6 +2438,43 @@ export default function App() {
       )}
 
       {/* ===== Marketplace ===== */}
+      {modal === "account" && guestId && (
+        <div className="scrim" onClick={() => setModal(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-head"><h3>👤 Your account</h3></div>
+            <p className="subtitle" style={{ marginTop: -4 }}>
+              You are playing without a wallet, so this browser is what keeps your progress. Copy the
+              code below: it brings your duck, your {SIL} and your collection back on another device,
+              or after you clear the browser.
+            </p>
+            <div className="code-box">{prettyCode(guestId)}</div>
+            <button
+              className="btn btn-secondary"
+              onClick={() => { navigator.clipboard?.writeText(guestId); setToast("Player code copied"); }}
+            >
+              📋 Copy the code
+            </button>
+            <p className="subtitle" style={{ marginTop: 2 }}>
+              Keep it to yourself: anyone who has it can play as you.
+            </p>
+
+            <div className="section-label" style={{ marginTop: 12 }}>Restore progress</div>
+            <p className="subtitle" style={{ marginTop: -4 }}>Paste a code to switch to that account.</p>
+            <input
+              className="name-input"
+              placeholder="g 1a2b 3c4d …"
+              value={codeInput}
+              onChange={(e) => setCodeInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") restoreByCode(); }}
+            />
+            <button className="btn btn-primary" disabled={codeBusy || !codeInput.trim()} onClick={restoreByCode}>
+              {codeBusy ? "Restoring…" : "Restore"}
+            </button>
+            <button className="btn btn-ghost" onClick={() => setModal(null)}>Close</button>
+          </div>
+        </div>
+      )}
+
       {DC_MARKET_ON && modal === "dcmarket" && pet && (() => {
         const lots = dcLots ?? [];
         const mine = lots.filter((l) => l.seller === playerId);
